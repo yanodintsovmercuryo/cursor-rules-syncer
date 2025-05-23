@@ -209,43 +209,43 @@ func checkGitRemoteOrigin(repoDir string) (bool, error) {
 	cmd.Dir = repoDir
 	if err := cmd.Run(); err != nil {
 		if _, ok := err.(*exec.ExitError); ok {
-			// Exit code 128 typically means "no such remote" or other git config errors.
-			// Other non-zero exit codes might also indicate 'origin' is not properly configured or accessible.
-			return false, nil // Assuming any error from "git remote get-url origin" means origin is not usable/present
+			return false, nil
 		}
-		return false, fmt.Errorf("error checking git remote origin: %w", err) // Unexpected error
+		return false, fmt.Errorf("error checking git remote origin: %w", err)
 	}
 	return true, nil
 }
 
 // commitChanges performs git add ., git commit -m "message", and git push in the specified directory.
-// Git push is only attempted if 'origin' remote exists.
+// Git push is only attempted if 'origin' remote exists. Output is minimal, only errors or specific statuses.
 func commitChanges(repoDir string, commitMessage string) error {
 	addCmd := exec.Command("git", "add", ".")
 	addCmd.Dir = repoDir
 	output, err := addCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("error running 'git add .': %s, %w", string(output), err)
+		fmt.Fprintf(os.Stderr, "Error running 'git add .': %s\n%w\n", string(output), err)
+		return err // Return the original error to allow main to decide if it's fatal for the whole op
 	}
-	fmt.Printf("'git add .' executed successfully: %s\n", string(output))
+	// No output for successful add
 
 	commitCmd := exec.Command("git", "commit", "-m", commitMessage)
 	commitCmd.Dir = repoDir
 	output, err = commitCmd.CombinedOutput()
 	if err != nil {
-		// Check if the error is "nothing to commit"
 		if strings.Contains(string(output), "nothing to commit") || strings.Contains(string(output), "no changes added to commit") {
-			fmt.Println("No changes to commit.")
+			// fmt.Println("No changes to commit.") // Suppressed for minimal output unless specifically requested
 			return nil // Not an error, just nothing to do for commit
 		}
-		return fmt.Errorf("error running 'git commit': %s, %w", string(output), err)
+		fmt.Fprintf(os.Stderr, "Error running 'git commit': %s\n%w\n", string(output), err)
+		return err
 	}
-	fmt.Printf("'git commit' executed successfully: %s\n", string(output))
+	// No output for successful commit, or a very brief one if needed e.g. fmt.Printf("Committed: %s\n", commitMessage)
+	// For now, keeping it minimal. The calling function (push) will know if it was called.
 
 	originExists, err := checkGitRemoteOrigin(repoDir)
 	if err != nil {
-		// Log error but don't stop, push is optional
 		fmt.Fprintf(os.Stderr, "Could not verify remote 'origin': %v. Skipping push.\n", err)
+		// Not returning error here, as push is optional
 	}
 
 	if originExists {
@@ -253,12 +253,81 @@ func commitChanges(repoDir string, commitMessage string) error {
 		pushCmd.Dir = repoDir
 		output, err = pushCmd.CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("error running 'git push': %s, %w", string(output), err)
+			fmt.Fprintf(os.Stderr, "Error running 'git push': %s\n%w\n", string(output), err)
+			return err // Push error should be reported
 		}
-		fmt.Printf("'git push' executed successfully: %s\n", string(output))
+		// No output for successful push
 	} else {
-		fmt.Println("Remote 'origin' not found or not accessible. Skipping 'git push'.")
-		fmt.Println("Please push the changes manually if required.")
+		// fmt.Println("Remote 'origin' not found or not accessible. Skipping 'git push'.") // Suppressed
+		// fmt.Println("Please push the changes manually if required.") // Suppressed
 	}
 	return nil
+}
+
+// filesAreEqual compares the content of two files and returns true if they are identical.
+func filesAreEqual(file1, file2 string) (bool, error) {
+	// Check if both files exist
+	info1, err := os.Stat(file1)
+	if err != nil {
+		return false, err
+	}
+	info2, err := os.Stat(file2)
+	if err != nil {
+		return false, err
+	}
+
+	// If sizes are different, files are not equal
+	if info1.Size() != info2.Size() {
+		return false, nil
+	}
+
+	// Open both files
+	f1, err := os.Open(file1)
+	if err != nil {
+		return false, err
+	}
+	defer f1.Close()
+
+	f2, err := os.Open(file2)
+	if err != nil {
+		return false, err
+	}
+	defer f2.Close()
+
+	// Compare content in chunks
+	const chunkSize = 4096
+	buf1 := make([]byte, chunkSize)
+	buf2 := make([]byte, chunkSize)
+
+	for {
+		n1, err1 := f1.Read(buf1)
+		n2, err2 := f2.Read(buf2)
+
+		// If read different amounts, files are different
+		if n1 != n2 {
+			return false, nil
+		}
+
+		// Compare the read chunks
+		if n1 > 0 && string(buf1[:n1]) != string(buf2[:n2]) {
+			return false, nil
+		}
+
+		// If both reached EOF at the same time, files are equal
+		if err1 == io.EOF && err2 == io.EOF {
+			return true, nil
+		}
+
+		// If only one reached EOF or any other error occurred
+		if err1 != nil || err2 != nil {
+			if err1 == io.EOF || err2 == io.EOF {
+				return false, nil // One file ended earlier than the other
+			}
+			// Return the first error encountered
+			if err1 != nil {
+				return false, err1
+			}
+			return false, err2
+		}
+	}
 }
