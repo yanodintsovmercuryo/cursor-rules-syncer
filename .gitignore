@@ -1,0 +1,6 @@
+.idea
+.vscode
+.cursor
+
+# Build directory
+.build/

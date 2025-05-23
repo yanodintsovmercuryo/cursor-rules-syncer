@@ -1,0 +1,46 @@
+version: '3'
+
+vars:
+  BINARY_NAME: 'cursor-rules-syncer'
+  BUILD_DIR: '.build'
+  DEPS_DIR: '.build/deps'
+
+tasks:
+  deps:
+    desc: 'Install development dependencies'
+    status:
+      - 'test -f {{.DEPS_DIR}}/goimports'
+      - 'test -f {{.DEPS_DIR}}/golangci-lint'
+    cmds:
+      - 'mkdir -p {{.DEPS_DIR}}'
+      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install golang.org/x/tools/cmd/goimports@latest'
+      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest'
+
+  fmt:
+    desc: 'Format Go code and fix imports'
+    deps: ['deps']
+    cmds:
+      - '{{.DEPS_DIR}}/goimports -w .'
+      - 'gofmt -w -s .'
+
+  lint:
+    desc: 'Run golangci-lint with auto-fix'
+    deps: ['deps']
+    cmds:
+      - '{{.DEPS_DIR}}/golangci-lint run --fix ./...'
+
+  build:
+    desc: 'Build the application'
+    cmds:
+      - 'mkdir -p {{.BUILD_DIR}}'
+      - 'go build -o {{.BUILD_DIR}}/{{.BINARY_NAME}} .'
+
+  test:
+    desc: 'Run tests'
+    cmds:
+      - 'go test -v ./...'
+
+  tidy:
+    desc: 'Tidy up go.mod'
+    cmds:
+      - 'go mod tidy' 
