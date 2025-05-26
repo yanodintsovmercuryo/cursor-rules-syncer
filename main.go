@@ -23,6 +23,12 @@ const (
 	symbolUpdate = "*"
 )
 
+var (
+	rulesDir       string
+	gitWithoutPush bool
+	ignoreFiles    string
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "cursor-rules-syncer",
 	Short: "A CLI tool to sync cursor rules",
@@ -32,7 +38,7 @@ var pullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Pulls rules from the source directory to the current git project's .cursor/rules directory, deleting extra files in the project.",
 	Run: func(cmd *cobra.Command, args []string) {
-		rulesSourceDir, err := getRulesSourceDir()
+		rulesSourceDir, err := getRulesSourceDir(rulesDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -51,6 +57,19 @@ var pullCmd = &cobra.Command{
 
 		destRulesDir := filepath.Join(gitRoot, cursorDirName, rulesDirName)
 
+		// Load ignore patterns
+		ignoreMap, err := loadRuleignore(rulesSourceDir, ignoreFiles)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading ignore patterns: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Check for conflicts with ignored files
+		if err := checkIgnoredFilesConflict(destRulesDir, ignoreMap); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
 		if err := os.MkdirAll(destRulesDir, os.ModePerm); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating destination directory %s: %v\n", destRulesDir, err)
 			os.Exit(1)
@@ -61,6 +80,9 @@ var pullCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Error finding source files in %s: %v\n", rulesSourceDir, err)
 			os.Exit(1)
 		}
+
+		// Filter out ignored files
+		sourceMdcFiles = filterIgnoredFiles(sourceMdcFiles, ignoreMap)
 
 		sourceFilesMap := make(map[string]string) // basename -> full path
 		for _, f := range sourceMdcFiles {
@@ -128,7 +150,7 @@ var pushCmd = &cobra.Command{
 	Use:   "push",
 	Short: "Pushes rules from the current git project's .cursor/rules directory to the source directory, deleting extra files in the source, and commits changes",
 	Run: func(cmd *cobra.Command, args []string) {
-		rulesEnvDir, err := getRulesSourceDir()
+		rulesEnvDir, err := getRulesSourceDir(rulesDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -152,11 +174,21 @@ var pushCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Load ignore patterns
+		ignoreMap, err := loadRuleignore(rulesEnvDir, ignoreFiles)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading ignore patterns: %v\n", err)
+			os.Exit(1)
+		}
+
 		projectMdcFiles, err := findMdcFiles(rulesSourceDirInProject)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error finding files in project rules directory %s: %v\n", rulesSourceDirInProject, err)
 			os.Exit(1)
 		}
+
+		// Filter out ignored files
+		projectMdcFiles = filterIgnoredFiles(projectMdcFiles, ignoreMap)
 
 		projectFilesMap := make(map[string]string)
 		for _, f := range projectMdcFiles {
@@ -174,6 +206,9 @@ var pushCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "Error finding files in environment destination directory %s: %v\n", rulesEnvDir, err)
 			}
 		}
+
+		// Filter out ignored files from destination
+		destEnvMdcFiles = filterIgnoredFiles(destEnvMdcFiles, ignoreMap)
 
 		filesDeletedInEnv := false
 		for _, destFileFullPath := range destEnvMdcFiles {
@@ -241,7 +276,7 @@ var pushCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Commit will not be performed. Please commit changes in %s manually if needed.\n", rulesEnvDir)
 		} else {
 			commitMessage := "Sync cursor rules: updated from project " + filepath.Base(projectGitRoot)
-			if err := commitChanges(rulesEnvRepoRoot, commitMessage); err != nil {
+			if err := commitChanges(rulesEnvRepoRoot, commitMessage, gitWithoutPush); err != nil {
 				// commitChanges handles its own error printing
 			} else {
 				// Success message for commit is handled by commitChanges if needed, or kept silent
@@ -251,6 +286,14 @@ var pushCmd = &cobra.Command{
 }
 
 func init() {
+	// Add flags to both commands
+	pullCmd.Flags().StringVar(&rulesDir, "rules-dir", "", "Path to rules directory (overrides CURSOR_RULES_DIR env var)")
+	pullCmd.Flags().StringVar(&ignoreFiles, "ignore-files", "", "Comma-separated list of files to ignore")
+
+	pushCmd.Flags().StringVar(&rulesDir, "rules-dir", "", "Path to rules directory (overrides CURSOR_RULES_DIR env var)")
+	pushCmd.Flags().BoolVar(&gitWithoutPush, "git-without-push", false, "Commit changes but don't push to remote")
+	pushCmd.Flags().StringVar(&ignoreFiles, "ignore-files", "", "Comma-separated list of files to ignore")
+
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(pushCmd)
 }

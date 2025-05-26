@@ -16,15 +16,100 @@ const (
 	cursorDirName        = ".cursor"
 	rulesDirName         = "rules"
 	headerSeparator      = "---"
+	ruleignoreFileName   = ".ruleignore"
 )
 
-// getRulesSourceDir retrieves the path to the rules directory from the environment variable.
-func getRulesSourceDir() (string, error) {
+// getRulesSourceDir retrieves the path to the rules directory from flag or environment variable.
+func getRulesSourceDir(flagValue string) (string, error) {
+	if flagValue != "" {
+		return flagValue, nil
+	}
+
 	rulesDir := os.Getenv(cursorRulesDirEnvVar)
 	if rulesDir == "" {
-		return "", fmt.Errorf("environment variable %s is not set", cursorRulesDirEnvVar)
+		return "", fmt.Errorf("rules directory not specified: use --rules-dir flag or set %s environment variable", cursorRulesDirEnvVar)
 	}
 	return rulesDir, nil
+}
+
+// loadRuleignore loads ignore patterns from .ruleignore file and command line flag
+func loadRuleignore(rulesDir string, ignoreFilesFlag string) (map[string]bool, error) {
+	ignoreMap := make(map[string]bool)
+
+	// Load from command line flag first
+	if ignoreFilesFlag != "" {
+		files := strings.Split(ignoreFilesFlag, ",")
+		for _, file := range files {
+			file = strings.TrimSpace(file)
+			if file != "" {
+				ignoreMap[file] = true
+			}
+		}
+	}
+
+	// Load from .ruleignore file
+	ruleignorePath := filepath.Join(rulesDir, ruleignoreFileName)
+	file, err := os.Open(ruleignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ignoreMap, nil // .ruleignore doesn't exist, that's fine
+		}
+		return nil, fmt.Errorf("error opening %s: %w", ruleignorePath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		ignoreMap[line] = true
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading %s: %w", ruleignorePath, err)
+	}
+
+	return ignoreMap, nil
+}
+
+// checkIgnoredFilesConflict checks if any ignored files exist in destination and returns error
+func checkIgnoredFilesConflict(destDir string, ignoreMap map[string]bool) error {
+	if len(ignoreMap) == 0 {
+		return nil
+	}
+
+	var conflicts []string
+	for fileName := range ignoreMap {
+		destPath := filepath.Join(destDir, fileName)
+		if _, err := os.Stat(destPath); err == nil {
+			conflicts = append(conflicts, fileName)
+		}
+	}
+
+	if len(conflicts) > 0 {
+		return fmt.Errorf("ignored files exist in destination (remove them or update .ruleignore): %s", strings.Join(conflicts, ", "))
+	}
+
+	return nil
+}
+
+// filterIgnoredFiles removes ignored files from the list
+func filterIgnoredFiles(files []string, ignoreMap map[string]bool) []string {
+	if len(ignoreMap) == 0 {
+		return files
+	}
+
+	var filtered []string
+	for _, file := range files {
+		fileName := filepath.Base(file)
+		if !ignoreMap[fileName] {
+			filtered = append(filtered, file)
+		}
+	}
+	return filtered
 }
 
 // getGitRootDir finds the root of the Git repository starting from the given directory.
@@ -217,8 +302,8 @@ func checkGitRemoteOrigin(repoDir string) (bool, error) {
 }
 
 // commitChanges performs git add ., git commit -m "message", and git push in the specified directory.
-// Git push is only attempted if 'origin' remote exists. Output is minimal, only errors or specific statuses.
-func commitChanges(repoDir string, commitMessage string) error {
+// Git push is only attempted if 'origin' remote exists and gitWithoutPush is false. Output is minimal, only errors or specific statuses.
+func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) error {
 	addCmd := exec.Command("git", "add", ".")
 	addCmd.Dir = repoDir
 	output, err := addCmd.CombinedOutput()
@@ -242,24 +327,26 @@ func commitChanges(repoDir string, commitMessage string) error {
 	// No output for successful commit, or a very brief one if needed e.g. fmt.Printf("Committed: %s\n", commitMessage)
 	// For now, keeping it minimal. The calling function (push) will know if it was called.
 
-	originExists, err := checkGitRemoteOrigin(repoDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not verify remote 'origin': %v. Skipping push.\n", err)
-		// Not returning error here, as push is optional
-	}
-
-	if originExists {
-		pushCmd := exec.Command("git", "push")
-		pushCmd.Dir = repoDir
-		output, err = pushCmd.CombinedOutput()
+	if !gitWithoutPush {
+		originExists, err := checkGitRemoteOrigin(repoDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error running 'git push': %s\n%w\n", string(output), err)
-			return err // Push error should be reported
+			fmt.Fprintf(os.Stderr, "Could not verify remote 'origin': %v. Skipping push.\n", err)
+			// Not returning error here, as push is optional
 		}
-		// No output for successful push
-	} else {
-		// fmt.Println("Remote 'origin' not found or not accessible. Skipping 'git push'.") // Suppressed
-		// fmt.Println("Please push the changes manually if required.") // Suppressed
+
+		if originExists {
+			pushCmd := exec.Command("git", "push")
+			pushCmd.Dir = repoDir
+			output, err = pushCmd.CombinedOutput()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error running 'git push': %s\n%w\n", string(output), err)
+				return err // Push error should be reported
+			}
+			// No output for successful push
+		} else {
+			// fmt.Println("Remote 'origin' not found or not accessible. Skipping 'git push'.") // Suppressed
+			// fmt.Println("Please push the changes manually if required.") // Suppressed
+		}
 	}
 	return nil
 }

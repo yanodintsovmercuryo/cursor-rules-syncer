@@ -35,12 +35,27 @@ Alternatively, you can build from source:
 
 Once installed and `CURSOR_RULES_DIR` is set, you can use the tool from any directory within a Git project.
 
+### Command Line Options
+
+#### Global Flags
+*   `--rules-dir <path>` - Specify rules directory path (overrides `CURSOR_RULES_DIR` environment variable)
+*   `--ignore-files <file1,file2>` - Comma-separated list of files to ignore during sync
+
+#### Push-specific Flags
+*   `--git-without-push` - Commit changes but don't push to remote repository
+
 ### Pull Rules
 
 To pull the latest rules from your central `CURSOR_RULES_DIR` into the current project:
 
 ```bash
 cursor-rules-syncer pull
+```
+
+You can also specify a different rules directory:
+
+```bash
+cursor-rules-syncer pull --rules-dir /path/to/other/rules
 ```
 
 This will:
@@ -56,6 +71,12 @@ To push local rule changes from the current project's `.cursor/rules` directory 
 
 ```bash
 cursor-rules-syncer push
+```
+
+To commit changes without pushing to remote:
+
+```bash
+cursor-rules-syncer push --git-without-push
 ```
 
 This will:
@@ -79,6 +100,41 @@ This will:
 *   **Safe Operations:** Only shows updates when content actually differs.
 *   **Auto-cleanup:** Removes extra files in destination that don't exist in source.
 *   **Git Integration:** Automatically commits and pushes changes when using `push` command.
+*   **File Filtering:** Support for `.ruleignore` file and `--ignore-files` flag to exclude specific files from synchronization.
+
+## File Filtering
+
+### .ruleignore File
+
+You can create a `.ruleignore` file in your rules source directory to specify files that should be excluded from synchronization. The format is similar to `.gitignore`:
+
+```
+# Comments start with #
+# Empty lines are ignored
+
+# Ignore specific files
+secret-rules.mdc
+experimental.mdc
+
+# Ignore temporary files
+temp.mdc
+draft.mdc
+```
+
+### Command Line Filtering
+
+You can also specify files to ignore using the `--ignore-files` flag:
+
+```bash
+cursor-rules-syncer pull --ignore-files "secret.mdc,temp.mdc"
+cursor-rules-syncer push --ignore-files "experimental.mdc"
+```
+
+### Conflict Detection
+
+When using `pull`, if any ignored files exist in the destination project, the operation will fail with an error. This prevents accidental conflicts. You must either:
+- Remove the conflicting files from the project
+- Update your `.ruleignore` file to exclude them
 
 ## Header Preservation
 

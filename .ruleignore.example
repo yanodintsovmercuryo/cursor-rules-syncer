@@ -1,0 +1,12 @@
+# .ruleignore example file
+# This file should be placed in your rules source directory
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+
+# Example: ignore specific files
+# secret-rules.mdc
+# experimental.mdc
+
+# Example: ignore temporary files
+# temp.mdc
+# draft.mdc 
