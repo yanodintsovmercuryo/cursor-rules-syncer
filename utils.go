@@ -150,66 +150,17 @@ func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
 	}
 	defer srcFile.Close()
 
-	// Try to read the header from the destination file if it exists
-	existingHeader := ""
-	if _, err := os.Stat(dstPath); err == nil {
-		dstFile, openErr := os.Open(dstPath)
-		if openErr != nil {
-			// If opening failed, it might not be an error (file doesn't exist or is corrupted)
-			// Continue without a header
-		} else {
-			defer dstFile.Close()
-			scanner := bufio.NewScanner(dstFile)
-			inHeader := false
-			lineCount := 0
-			var headerLines []string
-			firstSeparatorFound := false
-
-			for scanner.Scan() {
-				line := scanner.Text()
-				lineCount++
-
-				if line == headerSeparator {
-					headerLines = append(headerLines, line)
-					if !firstSeparatorFound {
-						inHeader = true
-						firstSeparatorFound = true
-					} else {
-						// Second separator found, header is complete
-						break
-					}
-				} else if inHeader {
-					headerLines = append(headerLines, line)
-				} else if lineCount == 1 && line != headerSeparator {
-					// First line is not a separator, so no header
-					break
-				}
-				// Limit the number of lines for the header to avoid reading the entire file
-				if lineCount > 20 && inHeader { // Increased limit slightly
-					fmt.Printf("Warning: Header in %s is too long or not properly terminated, it might not be fully preserved.\n", dstPath)
-					headerLines = nil // Discard potentially incomplete header
-					break
-				}
-			}
-
-			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("error reading destination file %s: %w", dstPath, err)
-			}
-
-			if len(headerLines) > 1 && headerLines[0] == headerSeparator && headerLines[len(headerLines)-1] == headerSeparator {
-				existingHeader = strings.Join(headerLines, "\n") + "\n"
-			}
-		}
+	existingHeader, err := extractExistingHeader(dstPath)
+	if err != nil {
+		return err
 	}
 
-	// Create or overwrite the destination file
 	newDstFile, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create/overwrite destination file %s: %w", dstPath, err)
 	}
 	defer newDstFile.Close()
 
-	// Write the existing header if it's not empty
 	if existingHeader != "" {
 		_, err = newDstFile.WriteString(existingHeader)
 		if err != nil {
@@ -217,65 +168,146 @@ func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
 		}
 	}
 
-	// Copy the rest of the content from the source file
+	return copySourceContent(srcFile, newDstFile, srcPath, dstPath, existingHeader != "")
+}
+
+// extractExistingHeader reads and extracts the header from the destination file if it exists
+func extractExistingHeader(dstPath string) (string, error) {
+	if _, statErr := os.Stat(dstPath); statErr != nil {
+		return "", nil // File doesn't exist, no header to preserve
+	}
+
+	dstFile, openErr := os.Open(dstPath)
+	if openErr != nil {
+		return "", nil // Can't open file, continue without header
+	}
+	defer dstFile.Close()
+
+	return readHeaderFromFile(dstFile, dstPath)
+}
+
+// readHeaderFromFile reads the header section from a file
+func readHeaderFromFile(file *os.File, filePath string) (string, error) {
+	scanner := bufio.NewScanner(file)
+	inHeader := false
+	lineCount := 0
+	var headerLines []string
+	firstSeparatorFound := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineCount++
+
+		switch {
+		case line == headerSeparator:
+			headerLines = append(headerLines, line)
+			if !firstSeparatorFound {
+				inHeader = true
+				firstSeparatorFound = true
+			} else {
+				// Second separator found, header is complete
+				goto headerComplete
+			}
+		case inHeader:
+			headerLines = append(headerLines, line)
+		case lineCount == 1 && line != headerSeparator:
+			// First line is not a separator, so no header
+			goto headerComplete
+		}
+		// Limit the number of lines for the header to avoid reading the entire file
+		if lineCount > 20 && inHeader {
+			fmt.Printf("Warning: Header in %s is too long or not properly terminated, it might not be fully preserved.\n", filePath)
+			headerLines = nil // Discard potentially incomplete header
+			break
+		}
+	}
+
+headerComplete:
+	if scanErr := scanner.Err(); scanErr != nil {
+		return "", fmt.Errorf("error reading destination file %s: %w", filePath, scanErr)
+	}
+
+	if len(headerLines) > 1 && headerLines[0] == headerSeparator && headerLines[len(headerLines)-1] == headerSeparator {
+		return strings.Join(headerLines, "\n") + "\n", nil
+	}
+
+	return "", nil
+}
+
+// copySourceContent copies content from source file to destination, optionally skipping source header
+func copySourceContent(srcFile *os.File, dstFile *os.File, srcPath, dstPath string, preserveDestHeader bool) error {
 	srcScanner := bufio.NewScanner(srcFile)
+
+	if preserveDestHeader {
+		if err := skipSourceHeader(srcFile, srcScanner, srcPath); err != nil {
+			return err
+		}
+	}
+
+	return writeContentLines(srcScanner, dstFile, srcPath, dstPath, preserveDestHeader)
+}
+
+// skipSourceHeader skips the header section in the source file if destination header is being preserved
+func skipSourceHeader(srcFile *os.File, srcScanner *bufio.Scanner, srcPath string) error {
+	initialSrcFilePosition, seekErr := srcFile.Seek(0, io.SeekCurrent)
+	if seekErr != nil {
+		return fmt.Errorf("error getting source file position %s: %w", srcPath, seekErr)
+	}
+
 	srcContentLines := 0
 	skippingSrcHeader := false
 	srcFirstSeparatorFound := false
 
-	if existingHeader != "" { // If we are preserving the destination header, skip the source header
-		// Create a temporary slice to hold lines we might need if source header is not found
-		var potentialBodyLines []string
-		initialSrcFilePosition, _ := srcFile.Seek(0, io.SeekCurrent) // Get current position
+	for srcScanner.Scan() {
+		line := srcScanner.Text()
+		srcContentLines++
 
-		for srcScanner.Scan() {
-			line := srcScanner.Text()
-			srcContentLines++
-			potentialBodyLines = append(potentialBodyLines, line)
-
-			if line == headerSeparator {
-				if !srcFirstSeparatorFound {
-					srcFirstSeparatorFound = true
-				} else {
-					skippingSrcHeader = true // Found the second separator, start copying from the next line
-					break
-				}
-			}
-			if srcContentLines > 20 && srcFirstSeparatorFound { // Increased limit
-				// Could not find the end of the source header, copy everything from source
-				skippingSrcHeader = false
-				break
-			}
-			if srcContentLines > 1 && !srcFirstSeparatorFound && line != headerSeparator {
-				// First line was not a separator, so no header in source or malformed
-				skippingSrcHeader = false
+		if line == headerSeparator {
+			if !srcFirstSeparatorFound {
+				srcFirstSeparatorFound = true
+			} else {
+				skippingSrcHeader = true // Found the second separator, start copying from the next line
 				break
 			}
 		}
-		if srcScanner.Err() != nil {
-			return fmt.Errorf("error skipping source file header %s: %w", srcPath, srcScanner.Err())
+		if srcContentLines > 20 && srcFirstSeparatorFound {
+			// Could not find the end of the source header, copy everything from source
+			skippingSrcHeader = false
+			break
 		}
-
-		if !skippingSrcHeader {
-			// If source header was not skipped (e.g. not found, too long), reset scanner and write all read lines
-			_, err = srcFile.Seek(initialSrcFilePosition, io.SeekStart) // Reset to position before header scan
-			if err != nil {
-				return fmt.Errorf("error seeking source file %s: %w", srcPath, err)
-			}
-			srcScanner = bufio.NewScanner(srcFile) // Re-initialize scanner
-			// The content will be written by the next loop.
+		if srcContentLines > 1 && !srcFirstSeparatorFound && line != headerSeparator {
+			// First line was not a separator, so no header in source or malformed
+			skippingSrcHeader = false
+			break
 		}
 	}
 
-	// Copy content (after the header, if it was skipped)
+	if srcScanner.Err() != nil {
+		return fmt.Errorf("error skipping source file header %s: %w", srcPath, srcScanner.Err())
+	}
+
+	if !skippingSrcHeader {
+		// If source header was not skipped (e.g. not found, too long), reset scanner and write all read lines
+		_, err := srcFile.Seek(initialSrcFilePosition, io.SeekStart) // Reset to position before header scan
+		if err != nil {
+			return fmt.Errorf("error seeking source file %s: %w", srcPath, err)
+		}
+		// Re-initialize scanner - this will be done by the caller
+	}
+
+	return nil
+}
+
+// writeContentLines writes the remaining content lines to the destination file
+func writeContentLines(srcScanner *bufio.Scanner, dstFile *os.File, srcPath, dstPath string, hasDestHeader bool) error {
 	firstRealLineWritten := false
 	for srcScanner.Scan() {
 		line := srcScanner.Text()
-		if existingHeader == "" && !firstRealLineWritten && strings.TrimSpace(line) == "" {
+		if !hasDestHeader && !firstRealLineWritten && strings.TrimSpace(line) == "" {
 			// Skip leading empty lines if there's no destination header being preserved
 			continue
 		}
-		_, err = newDstFile.WriteString(line + "\n")
+		_, err := dstFile.WriteString(line + "\n")
 		if err != nil {
 			return fmt.Errorf("error writing data to %s: %w", dstPath, err)
 		}
@@ -308,7 +340,7 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 	addCmd.Dir = repoDir
 	output, err := addCmd.CombinedOutput()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error running 'git add .': %s\n%w\n", string(output), err)
+		fmt.Fprintf(os.Stderr, "Error running 'git add .': %s\n%v\n", string(output), err)
 		return err // Return the original error to allow main to decide if it's fatal for the whole op
 	}
 	// No output for successful add
@@ -321,7 +353,7 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 			// fmt.Println("No changes to commit.") // Suppressed for minimal output unless specifically requested
 			return nil // Not an error, just nothing to do for commit
 		}
-		fmt.Fprintf(os.Stderr, "Error running 'git commit': %s\n%w\n", string(output), err)
+		fmt.Fprintf(os.Stderr, "Error running 'git commit': %s\n%v\n", string(output), err)
 		return err
 	}
 	// No output for successful commit, or a very brief one if needed e.g. fmt.Printf("Committed: %s\n", commitMessage)
@@ -339,13 +371,10 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 			pushCmd.Dir = repoDir
 			output, err = pushCmd.CombinedOutput()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error running 'git push': %s\n%w\n", string(output), err)
+				fmt.Fprintf(os.Stderr, "Error running 'git push': %s\n%v\n", string(output), err)
 				return err // Push error should be reported
 			}
 			// No output for successful push
-		} else {
-			// fmt.Println("Remote 'origin' not found or not accessible. Skipping 'git push'.") // Suppressed
-			// fmt.Println("Please push the changes manually if required.") // Suppressed
 		}
 	}
 	return nil
@@ -353,7 +382,11 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 
 // filesAreEqual compares the content of two files and returns true if they are identical.
 func filesAreEqual(file1, file2 string) (bool, error) {
-	// Check if both files exist
+	return compareFiles(file1, file2)
+}
+
+// compareFiles compares two files for equality
+func compareFiles(file1, file2 string) (bool, error) {
 	info1, err := os.Stat(file1)
 	if err != nil {
 		return false, err
@@ -368,7 +401,11 @@ func filesAreEqual(file1, file2 string) (bool, error) {
 		return false, nil
 	}
 
-	// Open both files
+	return compareFileContents(file1, file2)
+}
+
+// compareFileContents compares the actual content of two files
+func compareFileContents(file1, file2 string) (bool, error) {
 	f1, err := os.Open(file1)
 	if err != nil {
 		return false, err
@@ -381,36 +418,35 @@ func filesAreEqual(file1, file2 string) (bool, error) {
 	}
 	defer f2.Close()
 
-	// Compare content in chunks
+	return compareReaders(f1, f2)
+}
+
+// compareReaders compares content from two readers
+func compareReaders(r1, r2 io.Reader) (bool, error) {
 	const chunkSize = 4096
 	buf1 := make([]byte, chunkSize)
 	buf2 := make([]byte, chunkSize)
 
 	for {
-		n1, err1 := f1.Read(buf1)
-		n2, err2 := f2.Read(buf2)
+		n1, err1 := r1.Read(buf1)
+		n2, err2 := r2.Read(buf2)
 
-		// If read different amounts, files are different
 		if n1 != n2 {
 			return false, nil
 		}
 
-		// Compare the read chunks
 		if n1 > 0 && string(buf1[:n1]) != string(buf2[:n2]) {
 			return false, nil
 		}
 
-		// If both reached EOF at the same time, files are equal
 		if err1 == io.EOF && err2 == io.EOF {
 			return true, nil
 		}
 
-		// If only one reached EOF or any other error occurred
 		if err1 != nil || err2 != nil {
 			if err1 == io.EOF || err2 == io.EOF {
-				return false, nil // One file ended earlier than the other
+				return false, nil
 			}
-			// Return the first error encountered
 			if err1 != nil {
 				return false, err1
 			}

@@ -65,13 +65,13 @@ var pullCmd = &cobra.Command{
 		}
 
 		// Check for conflicts with ignored files
-		if err := checkIgnoredFilesConflict(destRulesDir, ignoreMap); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if conflictErr := checkIgnoredFilesConflict(destRulesDir, ignoreMap); conflictErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", conflictErr)
 			os.Exit(1)
 		}
 
-		if err := os.MkdirAll(destRulesDir, os.ModePerm); err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating destination directory %s: %v\n", destRulesDir, err)
+		if mkdirErr := os.MkdirAll(destRulesDir, os.ModePerm); mkdirErr != nil {
+			fmt.Fprintf(os.Stderr, "Error creating destination directory %s: %v\n", destRulesDir, mkdirErr)
 			os.Exit(1)
 		}
 
@@ -169,7 +169,7 @@ var pushCmd = &cobra.Command{
 
 		rulesSourceDirInProject := filepath.Join(projectGitRoot, cursorDirName, rulesDirName)
 
-		if _, err := os.Stat(rulesSourceDirInProject); os.IsNotExist(err) {
+		if _, statErr := os.Stat(rulesSourceDirInProject); os.IsNotExist(statErr) {
 			fmt.Fprintf(os.Stderr, "Error: Project rules directory %s not found. Nothing to push.\n", rulesSourceDirInProject)
 			os.Exit(1)
 		}
@@ -195,8 +195,8 @@ var pushCmd = &cobra.Command{
 			projectFilesMap[filepath.Base(f)] = f
 		}
 
-		if err := os.MkdirAll(rulesEnvDir, os.ModePerm); err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating destination directory %s: %v\n", rulesEnvDir, err)
+		if mkdirErr := os.MkdirAll(rulesEnvDir, os.ModePerm); mkdirErr != nil {
+			fmt.Fprintf(os.Stderr, "Error creating destination directory %s: %v\n", rulesEnvDir, mkdirErr)
 			os.Exit(1)
 		}
 
@@ -214,8 +214,8 @@ var pushCmd = &cobra.Command{
 		for _, destFileFullPath := range destEnvMdcFiles {
 			fileName := filepath.Base(destFileFullPath)
 			if _, existsInProject := projectFilesMap[fileName]; !existsInProject {
-				if err := os.Remove(destFileFullPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Error deleting file %s from %s: %v\n", fileName, rulesEnvDir, err)
+				if removeErr := os.Remove(destFileFullPath); removeErr != nil {
+					fmt.Fprintf(os.Stderr, "Error deleting file %s from %s: %v\n", fileName, rulesEnvDir, removeErr)
 				} else {
 					fmt.Printf("%s%s %s (from %s)%s\n", colorRed, symbolDelete, fileName, filepath.Base(rulesEnvDir), colorReset)
 					filesDeletedInEnv = true
@@ -233,19 +233,19 @@ var pushCmd = &cobra.Command{
 			dstFileFullPath := filepath.Join(rulesEnvDir, fileName)
 
 			fileExists := true
-			if _, err := os.Stat(dstFileFullPath); os.IsNotExist(err) {
+			if _, statErr := os.Stat(dstFileFullPath); os.IsNotExist(statErr) {
 				fileExists = false
-			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "Error checking destination file %s in %s: %v\n", fileName, rulesEnvDir, err)
+			} else if statErr != nil {
+				fmt.Fprintf(os.Stderr, "Error checking destination file %s in %s: %v\n", fileName, rulesEnvDir, statErr)
 				continue
 			}
 
 			// Check if files are different before copying
 			shouldCopy := true
 			if fileExists {
-				equal, err := filesAreEqual(srcFileFullPath, dstFileFullPath)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, err)
+				equal, compareErr := filesAreEqual(srcFileFullPath, dstFileFullPath)
+				if compareErr != nil {
+					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, compareErr)
 					// Continue with copying in case of comparison error
 				} else if equal {
 					shouldCopy = false // Files are identical, no need to copy
@@ -253,8 +253,8 @@ var pushCmd = &cobra.Command{
 			}
 
 			if shouldCopy {
-				if err := copyFileWithHeaderPreservation(srcFileFullPath, dstFileFullPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Error synchronizing file %s to %s: %v\n", fileName, rulesEnvDir, err)
+				if copyErr := copyFileWithHeaderPreservation(srcFileFullPath, dstFileFullPath); copyErr != nil {
+					fmt.Fprintf(os.Stderr, "Error synchronizing file %s to %s: %v\n", fileName, rulesEnvDir, copyErr)
 				} else {
 					if fileExists {
 						fmt.Printf("%s%s %s (to %s)%s\n", colorYellow, symbolUpdate, fileName, filepath.Base(rulesEnvDir), colorReset)
@@ -276,11 +276,8 @@ var pushCmd = &cobra.Command{
 			fmt.Fprintf(os.Stderr, "Commit will not be performed. Please commit changes in %s manually if needed.\n", rulesEnvDir)
 		} else {
 			commitMessage := "Sync cursor rules: updated from project " + filepath.Base(projectGitRoot)
-			if err := commitChanges(rulesEnvRepoRoot, commitMessage, gitWithoutPush); err != nil {
-				// commitChanges handles its own error printing
-			} else {
-				// Success message for commit is handled by commitChanges if needed, or kept silent
-			}
+			_ = commitChanges(rulesEnvRepoRoot, commitMessage, gitWithoutPush) //nolint:errcheck
+			// commitChanges handles its own error printing
 		}
 	},
 }
