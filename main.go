@@ -8,6 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version
+const version = "v0.0.6"
+
 // ANSI Color Codes
 const (
 	colorReset  = "\033[0m"
@@ -32,6 +35,14 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "cursor-rules-syncer",
 	Short: "A CLI tool to sync cursor rules",
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the version number",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(version)
+	},
 }
 
 var pullCmd = &cobra.Command{
@@ -122,7 +133,7 @@ var pullCmd = &cobra.Command{
 			// Check if files are different before copying
 			shouldCopy := true
 			if fileExistedBeforeCopy {
-				equal, err := filesAreEqualNormalized(srcFileFullPath, dstFileFullPath)
+				equal, err := filesAreEqualNormalizedWithoutHeaders(srcFileFullPath, dstFileFullPath)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, err)
 					// Continue with copying in case of comparison error
@@ -243,7 +254,7 @@ var pushCmd = &cobra.Command{
 			// Check if files are different before copying
 			shouldCopy := true
 			if fileExists {
-				equal, compareErr := filesAreEqualNormalized(srcFileFullPath, dstFileFullPath)
+				equal, compareErr := filesAreEqualNormalizedWithoutHeaders(srcFileFullPath, dstFileFullPath)
 				if compareErr != nil {
 					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, compareErr)
 					// Continue with copying in case of comparison error
@@ -293,6 +304,7 @@ func init() {
 
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(pushCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 func main() {

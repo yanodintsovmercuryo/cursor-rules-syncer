@@ -161,19 +161,44 @@ func filesAreEqualNormalized(file1, file2 string) (bool, error) {
 	return content1 == content2, nil
 }
 
-// readFileNormalized читает файл и нормализует line endings
+// filesAreEqualNormalizedWithoutHeaders compares files with line ending normalization, ignoring headers
+func filesAreEqualNormalizedWithoutHeaders(file1, file2 string) (bool, error) {
+	content1, err := readFileNormalized(file1)
+	if err != nil {
+		return false, err
+	}
+
+	content2, err := readFileNormalized(file2)
+	if err != nil {
+		return false, err
+	}
+
+	// Remove headers from both files before comparison
+	contentWithoutHeader1 := removeHeaderFromContent(content1)
+	contentWithoutHeader2 := removeHeaderFromContent(content2)
+
+	return contentWithoutHeader1 == contentWithoutHeader2, nil
+}
+
+// readFileNormalized reads file and normalizes line endings
 func readFileNormalized(filePath string) (string, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}
 
-	// Нормализуем line endings - приводим к LF
+	// Normalize line endings - convert to LF
 	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 
-	// Убираем trailing whitespace в конце файла
-	normalized = strings.TrimRight(normalized, " \t\n")
+	// Remove trailing whitespace except newlines, then normalize newlines at the end
+	normalized = strings.TrimRight(normalized, " \t")
+	normalized = strings.TrimRight(normalized, "\n")
+
+	// Add one newline at the end if file is not empty
+	if len(normalized) > 0 {
+		normalized += "\n"
+	}
 
 	return normalized, nil
 }
@@ -181,23 +206,23 @@ func readFileNormalized(filePath string) (string, error) {
 // copyFileWithHeaderPreservation copies a file, preserving the header of the destination file if it exists.
 // The header is defined by lines between --- at the beginning of the file.
 func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
-	// Читаем содержимое source файла полностью
+	// Read source file content completely
 	srcContent, err := os.ReadFile(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
 	}
 
-	// Нормализуем line endings в source content
+	// Normalize line endings in source content
 	srcContentStr := strings.ReplaceAll(string(srcContent), "\r\n", "\n")
 	srcContentStr = strings.ReplaceAll(srcContentStr, "\r", "\n")
 
-	// Проверяем существование destination файла и извлекаем header
+	// Check destination file existence and extract header
 	existingHeader, err := extractExistingHeader(dstPath)
 	if err != nil {
 		return err
 	}
 
-	// Если есть существующий header в destination, извлекаем content из source без его header
+	// If there's an existing header in destination, extract content from source without its header
 	var finalContent string
 	if existingHeader != "" {
 		srcContentWithoutHeader := removeHeaderFromContent(srcContentStr)
@@ -206,12 +231,12 @@ func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
 		finalContent = srcContentStr
 	}
 
-	// Убеждаемся что файл заканчивается переводом строки
+	// Ensure file ends with newline
 	if !strings.HasSuffix(finalContent, "\n") {
 		finalContent += "\n"
 	}
 
-	// Записываем финальное содержимое
+	// Write final content
 	err = os.WriteFile(dstPath, []byte(finalContent), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write destination file %s: %w", dstPath, err)
@@ -220,39 +245,39 @@ func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
 	return nil
 }
 
-// removeHeaderFromContent удаляет header из content string
+// removeHeaderFromContent removes header from content string
 func removeHeaderFromContent(content string) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 {
 		return content
 	}
 
-	// Проверяем начинается ли с header separator
+	// Check if it starts with header separator
 	if lines[0] != headerSeparator {
-		return content // Нет header, возвращаем как есть
+		return content // No header, return as is
 	}
 
-	// Ищем закрывающий separator
+	// Look for closing separator
 	for i := 1; i < len(lines); i++ {
 		if lines[i] == headerSeparator {
-			// Найден закрывающий separator, возвращаем содержимое после него
+			// Found closing separator, return content after it
 			if i+1 < len(lines) {
 				remainingLines := lines[i+1:]
-				// Убираем leading empty lines
+				// Remove leading empty lines
 				for len(remainingLines) > 0 && strings.TrimSpace(remainingLines[0]) == "" {
 					remainingLines = remainingLines[1:]
 				}
 				return strings.Join(remainingLines, "\n")
 			}
-			return "" // Header занимает весь файл
+			return "" // Header takes up entire file
 		}
-		// Ограничиваем поиск header разумным количеством строк
+		// Limit header search to reasonable number of lines
 		if i > 20 {
 			break
 		}
 	}
 
-	// Не найден закрывающий separator, возвращаем весь content
+	// No closing separator found, return entire content
 	return content
 }
 
@@ -270,30 +295,30 @@ func extractExistingHeader(dstPath string) (string, error) {
 	return extractHeaderFromContent(string(content)), nil
 }
 
-// extractHeaderFromContent извлекает header из content string
+// extractHeaderFromContent extracts header from content string
 func extractHeaderFromContent(content string) string {
-	// Нормализуем line endings
+	// Normalize line endings
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
 
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || lines[0] != headerSeparator {
-		return "" // Нет header
+		return "" // No header
 	}
 
 	var headerLines []string
-	headerLines = append(headerLines, lines[0]) // Добавляем первый separator
+	headerLines = append(headerLines, lines[0]) // Add first separator
 
-	// Ищем закрывающий separator
-	for i := 1; i < len(lines) && i <= 20; i++ { // Ограничиваем поиск 20 строками
+	// Look for closing separator
+	for i := 1; i < len(lines) && i <= 20; i++ { // Limit search to 20 lines
 		headerLines = append(headerLines, lines[i])
 		if lines[i] == headerSeparator {
-			// Найден закрывающий separator, возвращаем header с переводом строки
+			// Found closing separator, return header with newline
 			return strings.Join(headerLines, "\n") + "\n"
 		}
 	}
 
-	return "" // Не найден правильный header
+	return "" // No proper header found
 }
 
 // checkGitRemoteOrigin checks if 'origin' remote exists.
@@ -312,7 +337,7 @@ func checkGitRemoteOrigin(repoDir string) (bool, error) {
 // commitChanges performs git add ., git commit -m "message", and git push in the specified directory.
 // Git push is only attempted if 'origin' remote exists and gitWithoutPush is false. Output is minimal, only errors or specific statuses.
 func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) error {
-	// Используем git add -A вместо git add . для добавления всех изменений включая удаления
+	// Use git add -A instead of git add . to add all changes including deletions
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = repoDir
 	output, err := addCmd.CombinedOutput()
@@ -321,7 +346,7 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 		return err
 	}
 
-	// Проверяем статус для отладки
+	// Check status for debugging
 	statusCmd := exec.Command("git", "status", "--porcelain")
 	statusCmd.Dir = repoDir
 	statusOutput, statusErr := statusCmd.CombinedOutput()
@@ -330,7 +355,7 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 	} else {
 		statusLines := strings.TrimSpace(string(statusOutput))
 		if statusLines == "" {
-			return nil // Нет изменений для коммита
+			return nil // No changes to commit
 		}
 	}
 
