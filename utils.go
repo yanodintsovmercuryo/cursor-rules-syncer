@@ -141,34 +141,119 @@ func findMdcFiles(dir string) ([]string, error) {
 	return mdcFiles, nil
 }
 
+// filesAreEqual compares the content of two files and returns true if they are identical.
+func filesAreEqual(file1, file2 string) (bool, error) {
+	return compareFiles(file1, file2)
+}
+
+// filesAreEqualNormalized compares files with line ending normalization
+func filesAreEqualNormalized(file1, file2 string) (bool, error) {
+	content1, err := readFileNormalized(file1)
+	if err != nil {
+		return false, err
+	}
+
+	content2, err := readFileNormalized(file2)
+	if err != nil {
+		return false, err
+	}
+
+	return content1 == content2, nil
+}
+
+// readFileNormalized читает файл и нормализует line endings
+func readFileNormalized(filePath string) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Нормализуем line endings - приводим к LF
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	// Убираем trailing whitespace в конце файла
+	normalized = strings.TrimRight(normalized, " \t\n")
+
+	return normalized, nil
+}
+
 // copyFileWithHeaderPreservation copies a file, preserving the header of the destination file if it exists.
 // The header is defined by lines between --- at the beginning of the file.
 func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
-	srcFile, err := os.Open(srcPath)
+	// Читаем содержимое source файла полностью
+	srcContent, err := os.ReadFile(srcPath)
 	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
+		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
 	}
-	defer srcFile.Close()
 
+	// Нормализуем line endings в source content
+	srcContentStr := strings.ReplaceAll(string(srcContent), "\r\n", "\n")
+	srcContentStr = strings.ReplaceAll(srcContentStr, "\r", "\n")
+
+	// Проверяем существование destination файла и извлекаем header
 	existingHeader, err := extractExistingHeader(dstPath)
 	if err != nil {
 		return err
 	}
 
-	newDstFile, err := os.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create/overwrite destination file %s: %w", dstPath, err)
-	}
-	defer newDstFile.Close()
-
+	// Если есть существующий header в destination, извлекаем content из source без его header
+	var finalContent string
 	if existingHeader != "" {
-		_, err = newDstFile.WriteString(existingHeader)
-		if err != nil {
-			return fmt.Errorf("failed to write header to %s: %w", dstPath, err)
+		srcContentWithoutHeader := removeHeaderFromContent(srcContentStr)
+		finalContent = existingHeader + srcContentWithoutHeader
+	} else {
+		finalContent = srcContentStr
+	}
+
+	// Убеждаемся что файл заканчивается переводом строки
+	if !strings.HasSuffix(finalContent, "\n") {
+		finalContent += "\n"
+	}
+
+	// Записываем финальное содержимое
+	err = os.WriteFile(dstPath, []byte(finalContent), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write destination file %s: %w", dstPath, err)
+	}
+
+	return nil
+}
+
+// removeHeaderFromContent удаляет header из content string
+func removeHeaderFromContent(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return content
+	}
+
+	// Проверяем начинается ли с header separator
+	if lines[0] != headerSeparator {
+		return content // Нет header, возвращаем как есть
+	}
+
+	// Ищем закрывающий separator
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == headerSeparator {
+			// Найден закрывающий separator, возвращаем содержимое после него
+			if i+1 < len(lines) {
+				remainingLines := lines[i+1:]
+				// Убираем leading empty lines
+				for len(remainingLines) > 0 && strings.TrimSpace(remainingLines[0]) == "" {
+					remainingLines = remainingLines[1:]
+				}
+				return strings.Join(remainingLines, "\n")
+			}
+			return "" // Header занимает весь файл
+		}
+		// Ограничиваем поиск header разумным количеством строк
+		if i > 20 {
+			break
 		}
 	}
 
-	return copySourceContent(srcFile, newDstFile, srcPath, dstPath, existingHeader != "")
+	// Не найден закрывающий separator, возвращаем весь content
+	return content
 }
 
 // extractExistingHeader reads and extracts the header from the destination file if it exists
@@ -177,147 +262,38 @@ func extractExistingHeader(dstPath string) (string, error) {
 		return "", nil // File doesn't exist, no header to preserve
 	}
 
-	dstFile, openErr := os.Open(dstPath)
-	if openErr != nil {
-		return "", nil // Can't open file, continue without header
+	content, err := os.ReadFile(dstPath)
+	if err != nil {
+		return "", nil // Can't read file, continue without header
 	}
-	defer dstFile.Close()
 
-	return readHeaderFromFile(dstFile, dstPath)
+	return extractHeaderFromContent(string(content)), nil
 }
 
-// readHeaderFromFile reads the header section from a file
-func readHeaderFromFile(file *os.File, filePath string) (string, error) {
-	scanner := bufio.NewScanner(file)
-	inHeader := false
-	lineCount := 0
+// extractHeaderFromContent извлекает header из content string
+func extractHeaderFromContent(content string) string {
+	// Нормализуем line endings
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || lines[0] != headerSeparator {
+		return "" // Нет header
+	}
+
 	var headerLines []string
-	firstSeparatorFound := false
+	headerLines = append(headerLines, lines[0]) // Добавляем первый separator
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		lineCount++
-
-		switch {
-		case line == headerSeparator:
-			headerLines = append(headerLines, line)
-			if !firstSeparatorFound {
-				inHeader = true
-				firstSeparatorFound = true
-			} else {
-				// Second separator found, header is complete
-				goto headerComplete
-			}
-		case inHeader:
-			headerLines = append(headerLines, line)
-		case lineCount == 1 && line != headerSeparator:
-			// First line is not a separator, so no header
-			goto headerComplete
-		}
-		// Limit the number of lines for the header to avoid reading the entire file
-		if lineCount > 20 && inHeader {
-			fmt.Printf("Warning: Header in %s is too long or not properly terminated, it might not be fully preserved.\n", filePath)
-			headerLines = nil // Discard potentially incomplete header
-			break
+	// Ищем закрывающий separator
+	for i := 1; i < len(lines) && i <= 20; i++ { // Ограничиваем поиск 20 строками
+		headerLines = append(headerLines, lines[i])
+		if lines[i] == headerSeparator {
+			// Найден закрывающий separator, возвращаем header с переводом строки
+			return strings.Join(headerLines, "\n") + "\n"
 		}
 	}
 
-headerComplete:
-	if scanErr := scanner.Err(); scanErr != nil {
-		return "", fmt.Errorf("error reading destination file %s: %w", filePath, scanErr)
-	}
-
-	if len(headerLines) > 1 && headerLines[0] == headerSeparator && headerLines[len(headerLines)-1] == headerSeparator {
-		return strings.Join(headerLines, "\n") + "\n", nil
-	}
-
-	return "", nil
-}
-
-// copySourceContent copies content from source file to destination, optionally skipping source header
-func copySourceContent(srcFile *os.File, dstFile *os.File, srcPath, dstPath string, preserveDestHeader bool) error {
-	srcScanner := bufio.NewScanner(srcFile)
-
-	if preserveDestHeader {
-		if err := skipSourceHeader(srcFile, srcScanner, srcPath); err != nil {
-			return err
-		}
-	}
-
-	return writeContentLines(srcScanner, dstFile, srcPath, dstPath, preserveDestHeader)
-}
-
-// skipSourceHeader skips the header section in the source file if destination header is being preserved
-func skipSourceHeader(srcFile *os.File, srcScanner *bufio.Scanner, srcPath string) error {
-	initialSrcFilePosition, seekErr := srcFile.Seek(0, io.SeekCurrent)
-	if seekErr != nil {
-		return fmt.Errorf("error getting source file position %s: %w", srcPath, seekErr)
-	}
-
-	srcContentLines := 0
-	skippingSrcHeader := false
-	srcFirstSeparatorFound := false
-
-	for srcScanner.Scan() {
-		line := srcScanner.Text()
-		srcContentLines++
-
-		if line == headerSeparator {
-			if !srcFirstSeparatorFound {
-				srcFirstSeparatorFound = true
-			} else {
-				skippingSrcHeader = true // Found the second separator, start copying from the next line
-				break
-			}
-		}
-		if srcContentLines > 20 && srcFirstSeparatorFound {
-			// Could not find the end of the source header, copy everything from source
-			skippingSrcHeader = false
-			break
-		}
-		if srcContentLines > 1 && !srcFirstSeparatorFound && line != headerSeparator {
-			// First line was not a separator, so no header in source or malformed
-			skippingSrcHeader = false
-			break
-		}
-	}
-
-	if srcScanner.Err() != nil {
-		return fmt.Errorf("error skipping source file header %s: %w", srcPath, srcScanner.Err())
-	}
-
-	if !skippingSrcHeader {
-		// If source header was not skipped (e.g. not found, too long), reset scanner and write all read lines
-		_, err := srcFile.Seek(initialSrcFilePosition, io.SeekStart) // Reset to position before header scan
-		if err != nil {
-			return fmt.Errorf("error seeking source file %s: %w", srcPath, err)
-		}
-		// Re-initialize scanner - this will be done by the caller
-	}
-
-	return nil
-}
-
-// writeContentLines writes the remaining content lines to the destination file
-func writeContentLines(srcScanner *bufio.Scanner, dstFile *os.File, srcPath, dstPath string, hasDestHeader bool) error {
-	firstRealLineWritten := false
-	for srcScanner.Scan() {
-		line := srcScanner.Text()
-		if !hasDestHeader && !firstRealLineWritten && strings.TrimSpace(line) == "" {
-			// Skip leading empty lines if there's no destination header being preserved
-			continue
-		}
-		_, err := dstFile.WriteString(line + "\n")
-		if err != nil {
-			return fmt.Errorf("error writing data to %s: %w", dstPath, err)
-		}
-		firstRealLineWritten = true
-	}
-	if err := srcScanner.Err(); err != nil {
-		return fmt.Errorf("error reading source file %s: %w", srcPath, err)
-	}
-
-	return nil
+	return "" // Не найден правильный header
 }
 
 // checkGitRemoteOrigin checks if 'origin' remote exists.
@@ -336,33 +312,43 @@ func checkGitRemoteOrigin(repoDir string) (bool, error) {
 // commitChanges performs git add ., git commit -m "message", and git push in the specified directory.
 // Git push is only attempted if 'origin' remote exists and gitWithoutPush is false. Output is minimal, only errors or specific statuses.
 func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) error {
-	addCmd := exec.Command("git", "add", ".")
+	// Используем git add -A вместо git add . для добавления всех изменений включая удаления
+	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = repoDir
 	output, err := addCmd.CombinedOutput()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error running 'git add .': %s\n%v\n", string(output), err)
-		return err // Return the original error to allow main to decide if it's fatal for the whole op
+		fmt.Fprintf(os.Stderr, "Error running 'git add -A' in %s: %s\n%v\n", repoDir, string(output), err)
+		return err
 	}
-	// No output for successful add
+
+	// Проверяем статус для отладки
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoDir
+	statusOutput, statusErr := statusCmd.CombinedOutput()
+	if statusErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not check git status in %s: %v\n", repoDir, statusErr)
+	} else {
+		statusLines := strings.TrimSpace(string(statusOutput))
+		if statusLines == "" {
+			return nil // Нет изменений для коммита
+		}
+	}
 
 	commitCmd := exec.Command("git", "commit", "-m", commitMessage)
 	commitCmd.Dir = repoDir
 	output, err = commitCmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(output), "nothing to commit") || strings.Contains(string(output), "no changes added to commit") {
-			// fmt.Println("No changes to commit.") // Suppressed for minimal output unless specifically requested
 			return nil // Not an error, just nothing to do for commit
 		}
-		fmt.Fprintf(os.Stderr, "Error running 'git commit': %s\n%v\n", string(output), err)
+		fmt.Fprintf(os.Stderr, "Error running 'git commit' in %s: %s\n%v\n", repoDir, string(output), err)
 		return err
 	}
-	// No output for successful commit, or a very brief one if needed e.g. fmt.Printf("Committed: %s\n", commitMessage)
-	// For now, keeping it minimal. The calling function (push) will know if it was called.
 
 	if !gitWithoutPush {
 		originExists, err := checkGitRemoteOrigin(repoDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Could not verify remote 'origin': %v. Skipping push.\n", err)
+			fmt.Fprintf(os.Stderr, "Could not verify remote 'origin' in %s: %v. Skipping push.\n", repoDir, err)
 			// Not returning error here, as push is optional
 		}
 
@@ -371,18 +357,12 @@ func commitChanges(repoDir string, commitMessage string, gitWithoutPush bool) er
 			pushCmd.Dir = repoDir
 			output, err = pushCmd.CombinedOutput()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error running 'git push': %s\n%v\n", string(output), err)
+				fmt.Fprintf(os.Stderr, "Error running 'git push' in %s: %s\n%v\n", repoDir, string(output), err)
 				return err // Push error should be reported
 			}
-			// No output for successful push
 		}
 	}
 	return nil
-}
-
-// filesAreEqual compares the content of two files and returns true if they are identical.
-func filesAreEqual(file1, file2 string) (bool, error) {
-	return compareFiles(file1, file2)
 }
 
 // compareFiles compares two files for equality

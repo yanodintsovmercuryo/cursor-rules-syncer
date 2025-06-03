@@ -122,7 +122,7 @@ var pullCmd = &cobra.Command{
 			// Check if files are different before copying
 			shouldCopy := true
 			if fileExistedBeforeCopy {
-				equal, err := filesAreEqual(srcFileFullPath, dstFileFullPath)
+				equal, err := filesAreEqualNormalized(srcFileFullPath, dstFileFullPath)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, err)
 					// Continue with copying in case of comparison error
@@ -243,7 +243,7 @@ var pushCmd = &cobra.Command{
 			// Check if files are different before copying
 			shouldCopy := true
 			if fileExists {
-				equal, compareErr := filesAreEqual(srcFileFullPath, dstFileFullPath)
+				equal, compareErr := filesAreEqualNormalized(srcFileFullPath, dstFileFullPath)
 				if compareErr != nil {
 					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, compareErr)
 					// Continue with copying in case of comparison error
