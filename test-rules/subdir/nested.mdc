@@ -1,0 +1,6 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+This is a nested MDC file to test subdirectory support.
