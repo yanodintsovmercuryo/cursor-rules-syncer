@@ -1,0 +1,9 @@
+---
+description: Source rule
+author: Source Author
+version: 1.0
+priority: high
+---
+
+This is the main rule content from the source.
+It has important logic that should be synced.

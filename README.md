@@ -40,6 +40,7 @@ Once installed and `CURSOR_RULES_DIR` is set, you can use the tool from any dire
 #### Global Flags
 *   `--rules-dir <path>` - Specify rules directory path (overrides `CURSOR_RULES_DIR` environment variable)
 *   `--ignore-files <file1,file2>` - Comma-separated list of files to ignore during sync
+*   `--overwrite-headers` - Overwrite YAML headers instead of preserving them (default: preserve headers)
 
 #### Push-specific Flags
 *   `--git-without-push` - Commit changes but don't push to remote repository
@@ -62,7 +63,7 @@ This will:
 1. Read the `CURSOR_RULES_DIR` environment variable.
 2. Find the root of the current Git project.
 3. Create a `.cursor/rules` directory in the project root if it doesn't exist.
-4. Copy all `.mdc` files from `CURSOR_RULES_DIR` to `.cursor/rules`, preserving headers of existing files in the project.
+4. **Recursively** copy all files from `CURSOR_RULES_DIR` to `.cursor/rules`, preserving directory structure and headers of existing `.mdc` files in the project (unless `--overwrite-headers` is used).
 5. Delete any extra files in the project that don't exist in the source.
 
 ### Push Rules
@@ -79,10 +80,16 @@ To commit changes without pushing to remote:
 cursor-rules-syncer push --git-without-push
 ```
 
+To overwrite headers instead of preserving them:
+
+```bash
+cursor-rules-syncer push --overwrite-headers
+```
+
 This will:
 1. Read the `CURSOR_RULES_DIR` environment variable.
 2. Find the root of the current Git project.
-3. Copy all `.mdc` files from the project's `.cursor/rules` directory to `CURSOR_RULES_DIR`, preserving headers of existing files in the central repository.
+3. **Recursively** copy all files from the project's `.cursor/rules` directory to `CURSOR_RULES_DIR`, preserving directory structure and headers of existing `.mdc` files in the central repository (unless `--overwrite-headers` is used).
 4. Delete any extra files in the central repository that don't exist in the project.
 5. Change to the `CURSOR_RULES_DIR` Git repository.
 6. Execute `git add .`.
@@ -92,7 +99,9 @@ This will:
 ## Features
 
 *   **Smart Synchronization:** Only copies files that have actually changed, reducing unnecessary operations.
-*   **Header Preservation:** Preserves YAML frontmatter (header block between `---` lines) of existing files.
+*   **Recursive Directory Support:** Processes all files in subdirectories, preserving directory structure.
+*   **Header Preservation:** Preserves YAML frontmatter (header block between `---` lines) of existing `.mdc` files by default, with option to overwrite using `--overwrite-headers`. Non-.mdc files are copied as-is.
+*   **Advanced File Filtering:** Support for `.ruleignore` file with gitignore-style patterns (wildcards, negation with `!`, directory patterns) and `--ignore-files` flag.
 *   **Color-coded Output:** Shows operation status with colored indicators:
     *   🟢 `+` - Added files
     *   🟡 `*` - Updated files  
@@ -100,13 +109,12 @@ This will:
 *   **Safe Operations:** Only shows updates when content actually differs.
 *   **Auto-cleanup:** Removes extra files in destination that don't exist in source.
 *   **Git Integration:** Automatically commits and pushes changes when using `push` command.
-*   **File Filtering:** Support for `.ruleignore` file and `--ignore-files` flag to exclude specific files from synchronization.
 
 ## File Filtering
 
 ### .ruleignore File
 
-You can create a `.ruleignore` file in your rules source directory to specify files that should be excluded from synchronization. The format is similar to `.gitignore`:
+You can create a `.ruleignore` file in your rules source directory to specify files that should be excluded from synchronization. The format follows gitignore-style patterns with support for wildcards, directory patterns, and negation:
 
 ```
 # Comments start with #
@@ -116,9 +124,21 @@ You can create a `.ruleignore` file in your rules source directory to specify fi
 secret-rules.mdc
 experimental.mdc
 
-# Ignore temporary files
-temp.mdc
-draft.mdc
+# Ignore all files in specific directories
+temp/
+drafts/
+
+# Ignore files with specific patterns
+*.backup.mdc
+test-*.mdc
+
+# Use wildcards for subdirectories
+**/private/**
+**/temp/**/*.mdc
+
+# Negation patterns (include files that would otherwise be ignored)
+!important.mdc
+!**/public/**/*.mdc
 ```
 
 ### Command Line Filtering

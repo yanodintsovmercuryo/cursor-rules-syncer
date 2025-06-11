@@ -1,0 +1,7 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+This is a nested rule in a subdirectory.
+It tests the subdirectory structure preservation.

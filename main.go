@@ -27,9 +27,10 @@ const (
 )
 
 var (
-	rulesDir       string
-	gitWithoutPush bool
-	ignoreFiles    string
+	rulesDir         string
+	gitWithoutPush   bool
+	ignoreFiles      string
+	overwriteHeaders bool
 )
 
 var rootCmd = &cobra.Command{
@@ -69,14 +70,14 @@ var pullCmd = &cobra.Command{
 		destRulesDir := filepath.Join(gitRoot, cursorDirName, rulesDirName)
 
 		// Load ignore patterns
-		ignoreMap, err := loadRuleignore(rulesSourceDir, ignoreFiles)
+		ignorePatterns, err := loadRuleignore(rulesSourceDir, ignoreFiles)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error loading ignore patterns: %v\n", err)
 			os.Exit(1)
 		}
 
 		// Check for conflicts with ignored files
-		if conflictErr := checkIgnoredFilesConflict(destRulesDir, ignoreMap); conflictErr != nil {
+		if conflictErr := checkIgnoredFilesConflict(destRulesDir, ignorePatterns); conflictErr != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", conflictErr)
 			os.Exit(1)
 		}
@@ -86,56 +87,49 @@ var pullCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		sourceMdcFiles, err := findMdcFiles(rulesSourceDir)
+		sourceFiles, err := findAllFiles(rulesSourceDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error finding source files in %s: %v\n", rulesSourceDir, err)
 			os.Exit(1)
 		}
 
 		// Filter out ignored files
-		sourceMdcFiles = filterIgnoredFiles(sourceMdcFiles, ignoreMap)
+		sourceFiles = filterIgnoredFiles(sourceFiles, ignorePatterns, rulesSourceDir)
 
-		sourceFilesMap := make(map[string]string) // basename -> full path
-		for _, f := range sourceMdcFiles {
-			sourceFilesMap[filepath.Base(f)] = f
+		// Clean up extra files in destination that don't exist in source
+		if err := cleanupExtraFiles(sourceFiles, rulesSourceDir, destRulesDir, ignorePatterns); err != nil {
+			fmt.Fprintf(os.Stderr, "Error cleaning up extra files: %v\n", err)
+			os.Exit(1)
 		}
 
-		destMdcFiles, err := findMdcFiles(destRulesDir)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "Error finding files in destination directory %s: %v\n", destRulesDir, err)
+		// Copy files with proper directory structure
+		for _, srcFileFullPath := range sourceFiles {
+			dstFileFullPath, err := recreateDirectoryStructure(srcFileFullPath, rulesSourceDir, destRulesDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error recreating directory structure for %s: %v\n", srcFileFullPath, err)
+				continue
 			}
-		}
 
-		for _, destFileFullPath := range destMdcFiles {
-			fileName := filepath.Base(destFileFullPath)
-			if _, existsInSource := sourceFilesMap[fileName]; !existsInSource {
-				if err := os.Remove(destFileFullPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Error deleting file %s: %v\n", fileName, err)
-				} else {
-					fmt.Printf("%s%s %s%s\n", colorRed, symbolDelete, fileName, colorReset)
-				}
+			// Get relative path for display
+			relativePath, err := filepath.Rel(rulesSourceDir, srcFileFullPath)
+			if err != nil {
+				relativePath = filepath.Base(srcFileFullPath)
 			}
-		}
-
-		for _, srcFileFullPath := range sourceMdcFiles {
-			fileName := filepath.Base(srcFileFullPath)
-			dstFileFullPath := filepath.Join(destRulesDir, fileName)
 
 			fileExistedBeforeCopy := true
 			if _, err := os.Stat(dstFileFullPath); os.IsNotExist(err) {
 				fileExistedBeforeCopy = false
 			} else if err != nil {
-				fmt.Fprintf(os.Stderr, "Error checking destination file %s: %v\n", fileName, err)
-				continue // Skip this file if stat fails for other reasons
+				fmt.Fprintf(os.Stderr, "Error checking destination file %s: %v\n", relativePath, err)
+				continue
 			}
 
 			// Check if files are different before copying
 			shouldCopy := true
 			if fileExistedBeforeCopy {
-				equal, err := filesAreEqualNormalizedWithoutHeaders(srcFileFullPath, dstFileFullPath)
+				equal, err := filesAreEqualBasedOnExtension(srcFileFullPath, dstFileFullPath, overwriteHeaders)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, err)
+					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", relativePath, err)
 					// Continue with copying in case of comparison error
 				} else if equal {
 					shouldCopy = false // Files are identical, no need to copy
@@ -143,13 +137,14 @@ var pullCmd = &cobra.Command{
 			}
 
 			if shouldCopy {
-				if err := copyFileWithHeaderPreservation(srcFileFullPath, dstFileFullPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Error synchronizing file %s: %v\n", fileName, err)
+				copyErr := copyFileBasedOnExtension(srcFileFullPath, dstFileFullPath, overwriteHeaders)
+				if copyErr != nil {
+					fmt.Fprintf(os.Stderr, "Error synchronizing file %s: %v\n", relativePath, copyErr)
 				} else {
 					if fileExistedBeforeCopy {
-						fmt.Printf("%s%s %s%s\n", colorYellow, symbolUpdate, fileName, colorReset)
+						fmt.Printf("%s%s %s%s\n", colorYellow, symbolUpdate, relativePath, colorReset)
 					} else {
-						fmt.Printf("%s%s %s%s\n", colorGreen, symbolAdd, fileName, colorReset)
+						fmt.Printf("%s%s %s%s\n", colorGreen, symbolAdd, relativePath, colorReset)
 					}
 				}
 			}
@@ -186,109 +181,98 @@ var pushCmd = &cobra.Command{
 		}
 
 		// Load ignore patterns
-		ignoreMap, err := loadRuleignore(rulesEnvDir, ignoreFiles)
+		ignorePatterns, err := loadRuleignore(rulesEnvDir, ignoreFiles)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error loading ignore patterns: %v\n", err)
 			os.Exit(1)
 		}
 
-		projectMdcFiles, err := findMdcFiles(rulesSourceDirInProject)
+		projectFiles, err := findAllFiles(rulesSourceDirInProject)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error finding files in project rules directory %s: %v\n", rulesSourceDirInProject, err)
 			os.Exit(1)
 		}
 
 		// Filter out ignored files
-		projectMdcFiles = filterIgnoredFiles(projectMdcFiles, ignoreMap)
-
-		projectFilesMap := make(map[string]string)
-		for _, f := range projectMdcFiles {
-			projectFilesMap[filepath.Base(f)] = f
-		}
+		projectFiles = filterIgnoredFiles(projectFiles, ignorePatterns, rulesSourceDirInProject)
 
 		if mkdirErr := os.MkdirAll(rulesEnvDir, os.ModePerm); mkdirErr != nil {
 			fmt.Fprintf(os.Stderr, "Error creating destination directory %s: %v\n", rulesEnvDir, mkdirErr)
 			os.Exit(1)
 		}
 
-		destEnvMdcFiles, err := findMdcFiles(rulesEnvDir)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "Error finding files in environment destination directory %s: %v\n", rulesEnvDir, err)
-			}
-		}
-
-		// Filter out ignored files from destination
-		destEnvMdcFiles = filterIgnoredFiles(destEnvMdcFiles, ignoreMap)
-
-		filesDeletedInEnv := false
-		for _, destFileFullPath := range destEnvMdcFiles {
-			fileName := filepath.Base(destFileFullPath)
-			if _, existsInProject := projectFilesMap[fileName]; !existsInProject {
-				if removeErr := os.Remove(destFileFullPath); removeErr != nil {
-					fmt.Fprintf(os.Stderr, "Error deleting file %s from %s: %v\n", fileName, rulesEnvDir, removeErr)
-				} else {
-					fmt.Printf("%s%s %s (from %s)%s\n", colorRed, symbolDelete, fileName, filepath.Base(rulesEnvDir), colorReset)
-					filesDeletedInEnv = true
-				}
-			}
+		// Clean up extra files in destination that don't exist in source
+		if err := cleanupExtraFiles(projectFiles, rulesSourceDirInProject, rulesEnvDir, ignorePatterns); err != nil {
+			fmt.Fprintf(os.Stderr, "Error cleaning up extra files: %v\n", err)
+			os.Exit(1)
 		}
 
 		filesCopiedOrUpdated := false
-		if len(projectMdcFiles) == 0 && !filesDeletedInEnv {
-			return
-		}
-
-		for _, srcFileFullPath := range projectMdcFiles {
-			fileName := filepath.Base(srcFileFullPath)
-			dstFileFullPath := filepath.Join(rulesEnvDir, fileName)
-
-			fileExists := true
-			if _, statErr := os.Stat(dstFileFullPath); os.IsNotExist(statErr) {
-				fileExists = false
-			} else if statErr != nil {
-				fmt.Fprintf(os.Stderr, "Error checking destination file %s in %s: %v\n", fileName, rulesEnvDir, statErr)
-				continue
-			}
-
-			// Check if files are different before copying
-			shouldCopy := true
-			if fileExists {
-				equal, compareErr := filesAreEqualNormalizedWithoutHeaders(srcFileFullPath, dstFileFullPath)
-				if compareErr != nil {
-					fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", fileName, compareErr)
-					// Continue with copying in case of comparison error
-				} else if equal {
-					shouldCopy = false // Files are identical, no need to copy
-				}
-			}
-
-			if shouldCopy {
-				if copyErr := copyFileWithHeaderPreservation(srcFileFullPath, dstFileFullPath); copyErr != nil {
-					fmt.Fprintf(os.Stderr, "Error synchronizing file %s to %s: %v\n", fileName, rulesEnvDir, copyErr)
-				} else {
-					if fileExists {
-						fmt.Printf("%s%s %s (to %s)%s\n", colorYellow, symbolUpdate, fileName, filepath.Base(rulesEnvDir), colorReset)
-					} else {
-						fmt.Printf("%s%s %s (to %s)%s\n", colorGreen, symbolAdd, fileName, filepath.Base(rulesEnvDir), colorReset)
-					}
-					filesCopiedOrUpdated = true
-				}
-			}
-		}
-
-		if !filesCopiedOrUpdated && !filesDeletedInEnv {
-			return
-		}
-
-		rulesEnvRepoRoot, err := getGitRootDir(rulesEnvDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error finding Git repository root for %s: %v\n", rulesEnvDir, err)
-			fmt.Fprintf(os.Stderr, "Commit will not be performed. Please commit changes in %s manually if needed.\n", rulesEnvDir)
+		if len(projectFiles) == 0 {
+			// No files to process, but we might have deleted some files above
+			filesCopiedOrUpdated = false
 		} else {
-			commitMessage := "Sync cursor rules: updated from project " + filepath.Base(projectGitRoot)
-			_ = commitChanges(rulesEnvRepoRoot, commitMessage, gitWithoutPush) //nolint:errcheck
-			// commitChanges handles its own error printing
+			// Copy files with proper directory structure
+			for _, srcFileFullPath := range projectFiles {
+				dstFileFullPath, err := recreateDirectoryStructure(srcFileFullPath, rulesSourceDirInProject, rulesEnvDir)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error recreating directory structure for %s: %v\n", srcFileFullPath, err)
+					continue
+				}
+
+				// Get relative path for display
+				relativePath, err := filepath.Rel(rulesSourceDirInProject, srcFileFullPath)
+				if err != nil {
+					relativePath = filepath.Base(srcFileFullPath)
+				}
+
+				fileExists := true
+				if _, statErr := os.Stat(dstFileFullPath); os.IsNotExist(statErr) {
+					fileExists = false
+				} else if statErr != nil {
+					fmt.Fprintf(os.Stderr, "Error checking destination file %s in %s: %v\n", relativePath, rulesEnvDir, statErr)
+					continue
+				}
+
+				// Check if files are different before copying
+				shouldCopy := true
+				if fileExists {
+					equal, err := filesAreEqualBasedOnExtension(srcFileFullPath, dstFileFullPath, overwriteHeaders)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Error comparing files %s: %v\n", relativePath, err)
+						// Continue with copying in case of comparison error
+					} else if equal {
+						shouldCopy = false // Files are identical, no need to copy
+					}
+				}
+
+				if shouldCopy {
+					copyErr := copyFileBasedOnExtension(srcFileFullPath, dstFileFullPath, overwriteHeaders)
+					if copyErr != nil {
+						fmt.Fprintf(os.Stderr, "Error synchronizing file %s to %s: %v\n", relativePath, rulesEnvDir, copyErr)
+					} else {
+						if fileExists {
+							fmt.Printf("%s%s %s (to %s)%s\n", colorYellow, symbolUpdate, relativePath, filepath.Base(rulesEnvDir), colorReset)
+						} else {
+							fmt.Printf("%s%s %s (to %s)%s\n", colorGreen, symbolAdd, relativePath, filepath.Base(rulesEnvDir), colorReset)
+						}
+						filesCopiedOrUpdated = true
+					}
+				}
+			}
+		}
+
+		// Only commit if we have changes
+		if filesCopiedOrUpdated {
+			rulesEnvRepoRoot, err := getGitRootDir(rulesEnvDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error finding Git repository root for %s: %v\n", rulesEnvDir, err)
+				fmt.Fprintf(os.Stderr, "Commit will not be performed. Please commit changes in %s manually if needed.\n", rulesEnvDir)
+			} else {
+				commitMessage := "Sync cursor rules: updated from project " + filepath.Base(projectGitRoot)
+				_ = commitChanges(rulesEnvRepoRoot, commitMessage, gitWithoutPush) //nolint:errcheck
+				// commitChanges handles its own error printing
+			}
 		}
 	},
 }
@@ -297,10 +281,12 @@ func init() {
 	// Add flags to both commands
 	pullCmd.Flags().StringVar(&rulesDir, "rules-dir", "", "Path to rules directory (overrides CURSOR_RULES_DIR env var)")
 	pullCmd.Flags().StringVar(&ignoreFiles, "ignore-files", "", "Comma-separated list of files to ignore")
+	pullCmd.Flags().BoolVar(&overwriteHeaders, "overwrite-headers", false, "Overwrite headers instead of preserving them")
 
 	pushCmd.Flags().StringVar(&rulesDir, "rules-dir", "", "Path to rules directory (overrides CURSOR_RULES_DIR env var)")
 	pushCmd.Flags().BoolVar(&gitWithoutPush, "git-without-push", false, "Commit changes but don't push to remote")
 	pushCmd.Flags().StringVar(&ignoreFiles, "ignore-files", "", "Comma-separated list of files to ignore")
+	pushCmd.Flags().BoolVar(&overwriteHeaders, "overwrite-headers", false, "Overwrite headers instead of preserving them")
 
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(pushCmd)

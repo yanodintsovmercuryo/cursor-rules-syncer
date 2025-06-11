@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -18,6 +19,13 @@ const (
 	headerSeparator      = "---"
 	ruleignoreFileName   = ".ruleignore"
 )
+
+// ignorePattern represents a compiled ignore pattern
+type ignorePattern struct {
+	pattern    string
+	regex      *regexp.Regexp
+	isNegation bool
+}
 
 // getRulesSourceDir retrieves the path to the rules directory from flag or environment variable.
 func getRulesSourceDir(flagValue string) (string, error) {
@@ -33,8 +41,8 @@ func getRulesSourceDir(flagValue string) (string, error) {
 }
 
 // loadRuleignore loads ignore patterns from .ruleignore file and command line flag
-func loadRuleignore(rulesDir string, ignoreFilesFlag string) (map[string]bool, error) {
-	ignoreMap := make(map[string]bool)
+func loadRuleignore(rulesDir string, ignoreFilesFlag string) ([]ignorePattern, error) {
+	var patterns []ignorePattern
 
 	// Load from command line flag first
 	if ignoreFilesFlag != "" {
@@ -42,7 +50,11 @@ func loadRuleignore(rulesDir string, ignoreFilesFlag string) (map[string]bool, e
 		for _, file := range files {
 			file = strings.TrimSpace(file)
 			if file != "" {
-				ignoreMap[file] = true
+				pattern, err := compileIgnorePattern(file)
+				if err != nil {
+					return nil, fmt.Errorf("error compiling ignore pattern '%s': %w", file, err)
+				}
+				patterns = append(patterns, pattern)
 			}
 		}
 	}
@@ -52,7 +64,7 @@ func loadRuleignore(rulesDir string, ignoreFilesFlag string) (map[string]bool, e
 	file, err := os.Open(ruleignorePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ignoreMap, nil // .ruleignore doesn't exist, that's fine
+			return patterns, nil // .ruleignore doesn't exist, that's fine
 		}
 		return nil, fmt.Errorf("error opening %s: %w", ruleignorePath, err)
 	}
@@ -65,28 +77,139 @@ func loadRuleignore(rulesDir string, ignoreFilesFlag string) (map[string]bool, e
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		ignoreMap[line] = true
+
+		pattern, err := compileIgnorePattern(line)
+		if err != nil {
+			return nil, fmt.Errorf("error compiling ignore pattern '%s' in %s: %w", line, ruleignorePath, err)
+		}
+		patterns = append(patterns, pattern)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading %s: %w", ruleignorePath, err)
 	}
 
-	return ignoreMap, nil
+	return patterns, nil
+}
+
+// compileIgnorePattern compiles a gitignore-style pattern into a regex
+func compileIgnorePattern(pattern string) (ignorePattern, error) {
+	isNegation := strings.HasPrefix(pattern, "!")
+	if isNegation {
+		pattern = pattern[1:]
+	}
+
+	// Convert gitignore pattern to regex
+	regexPattern := gitignoreToRegex(pattern)
+
+	regex, err := regexp.Compile(regexPattern)
+	if err != nil {
+		return ignorePattern{}, err
+	}
+
+	return ignorePattern{
+		pattern:    pattern,
+		regex:      regex,
+		isNegation: isNegation,
+	}, nil
+}
+
+// gitignoreToRegex converts a gitignore pattern to a regex pattern
+func gitignoreToRegex(pattern string) string {
+	// Escape special regex characters, but handle gitignore special chars differently
+	result := strings.Builder{}
+
+	i := 0
+	for i < len(pattern) {
+		switch pattern[i] {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				// ** matches any number of directories
+				if i+2 < len(pattern) && pattern[i+2] == '/' {
+					result.WriteString("(?:.*/)?")
+					i += 3
+				} else if i == 0 || pattern[i-1] == '/' {
+					result.WriteString(".*")
+					i += 2
+				} else {
+					result.WriteString("[^/]*")
+					i++
+				}
+			} else {
+				// * matches anything except /
+				result.WriteString("[^/]*")
+				i++
+			}
+		case '?':
+			result.WriteString("[^/]")
+			i++
+		case '[':
+			// Character class - pass through
+			result.WriteByte('[')
+			i++
+		case ']':
+			result.WriteByte(']')
+			i++
+		case '.', '^', '$', '+', '{', '}', '|', '(', ')':
+			// Escape regex special characters
+			result.WriteByte('\\')
+			result.WriteByte(pattern[i])
+			i++
+		default:
+			result.WriteByte(pattern[i])
+			i++
+		}
+	}
+
+	// Add anchors
+	return "^" + result.String() + "$"
+}
+
+// shouldIgnoreFile checks if a file should be ignored based on patterns
+func shouldIgnoreFile(relativePath string, patterns []ignorePattern) bool {
+	ignored := false
+
+	for _, pattern := range patterns {
+		if pattern.regex.MatchString(relativePath) || pattern.regex.MatchString(filepath.Base(relativePath)) {
+			if pattern.isNegation {
+				ignored = false
+			} else {
+				ignored = true
+			}
+		}
+	}
+
+	return ignored
 }
 
 // checkIgnoredFilesConflict checks if any ignored files exist in destination and returns error
-func checkIgnoredFilesConflict(destDir string, ignoreMap map[string]bool) error {
-	if len(ignoreMap) == 0 {
+func checkIgnoredFilesConflict(destDir string, patterns []ignorePattern) error {
+	if len(patterns) == 0 {
 		return nil
 	}
 
 	var conflicts []string
-	for fileName := range ignoreMap {
-		destPath := filepath.Join(destDir, fileName)
-		if _, err := os.Stat(destPath); err == nil {
-			conflicts = append(conflicts, fileName)
+
+	err := filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
+
+		if !info.IsDir() {
+			relativePath, err := filepath.Rel(destDir, path)
+			if err != nil {
+				return err
+			}
+
+			if shouldIgnoreFile(relativePath, patterns) {
+				conflicts = append(conflicts, relativePath)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("error checking for conflicts: %w", err)
 	}
 
 	if len(conflicts) > 0 {
@@ -97,15 +220,21 @@ func checkIgnoredFilesConflict(destDir string, ignoreMap map[string]bool) error 
 }
 
 // filterIgnoredFiles removes ignored files from the list
-func filterIgnoredFiles(files []string, ignoreMap map[string]bool) []string {
-	if len(ignoreMap) == 0 {
+func filterIgnoredFiles(files []string, patterns []ignorePattern, baseDir string) []string {
+	if len(patterns) == 0 {
 		return files
 	}
 
 	var filtered []string
 	for _, file := range files {
-		fileName := filepath.Base(file)
-		if !ignoreMap[fileName] {
+		relativePath, err := filepath.Rel(baseDir, file)
+		if err != nil {
+			// If we can't get relative path, include the file
+			filtered = append(filtered, file)
+			continue
+		}
+
+		if !shouldIgnoreFile(relativePath, patterns) {
 			filtered = append(filtered, file)
 		}
 	}
@@ -123,7 +252,7 @@ func getGitRootDir(startDir string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// findMdcFiles finds all .mdc files in the specified directory.
+// findMdcFiles finds all .mdc files in the specified directory recursively.
 func findMdcFiles(dir string) ([]string, error) {
 	var mdcFiles []string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -141,71 +270,26 @@ func findMdcFiles(dir string) ([]string, error) {
 	return mdcFiles, nil
 }
 
-// filesAreEqual compares the content of two files and returns true if they are identical.
-func filesAreEqual(file1, file2 string) (bool, error) {
-	return compareFiles(file1, file2)
+// findAllFiles finds all files in the specified directory recursively.
+func findAllFiles(dir string) ([]string, error) {
+	var allFiles []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			allFiles = append(allFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error finding files in %s: %w", dir, err)
+	}
+	return allFiles, nil
 }
 
-// filesAreEqualNormalized compares files with line ending normalization
-func filesAreEqualNormalized(file1, file2 string) (bool, error) {
-	content1, err := readFileNormalized(file1)
-	if err != nil {
-		return false, err
-	}
-
-	content2, err := readFileNormalized(file2)
-	if err != nil {
-		return false, err
-	}
-
-	return content1 == content2, nil
-}
-
-// filesAreEqualNormalizedWithoutHeaders compares files with line ending normalization, ignoring headers
-func filesAreEqualNormalizedWithoutHeaders(file1, file2 string) (bool, error) {
-	content1, err := readFileNormalized(file1)
-	if err != nil {
-		return false, err
-	}
-
-	content2, err := readFileNormalized(file2)
-	if err != nil {
-		return false, err
-	}
-
-	// Remove headers from both files before comparison
-	contentWithoutHeader1 := removeHeaderFromContent(content1)
-	contentWithoutHeader2 := removeHeaderFromContent(content2)
-
-	return contentWithoutHeader1 == contentWithoutHeader2, nil
-}
-
-// readFileNormalized reads file and normalizes line endings
-func readFileNormalized(filePath string) (string, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", err
-	}
-
-	// Normalize line endings - convert to LF
-	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
-	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-
-	// Remove trailing whitespace except newlines, then normalize newlines at the end
-	normalized = strings.TrimRight(normalized, " \t")
-	normalized = strings.TrimRight(normalized, "\n")
-
-	// Add one newline at the end if file is not empty
-	if len(normalized) > 0 {
-		normalized += "\n"
-	}
-
-	return normalized, nil
-}
-
-// copyFileWithHeaderPreservation copies a file, preserving the header of the destination file if it exists.
-// The header is defined by lines between --- at the beginning of the file.
-func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
+// copyFile copies a file, optionally preserving headers
+func copyFile(srcPath, dstPath string, preserveHeaders bool) error {
 	// Read source file content completely
 	srcContent, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -216,24 +300,35 @@ func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
 	srcContentStr := strings.ReplaceAll(string(srcContent), "\r\n", "\n")
 	srcContentStr = strings.ReplaceAll(srcContentStr, "\r", "\n")
 
-	// Check destination file existence and extract header
-	existingHeader, err := extractExistingHeader(dstPath)
-	if err != nil {
-		return err
-	}
-
-	// If there's an existing header in destination, extract content from source without its header
 	var finalContent string
-	if existingHeader != "" {
-		srcContentWithoutHeader := removeHeaderFromContent(srcContentStr)
-		finalContent = existingHeader + srcContentWithoutHeader
+
+	if preserveHeaders {
+		// Check destination file existence and extract header
+		existingHeader, err := extractExistingHeader(dstPath)
+		if err != nil {
+			return err
+		}
+
+		// If there's an existing header in destination, extract content from source without its header
+		if existingHeader != "" {
+			srcContentWithoutHeader := removeHeaderFromContent(srcContentStr)
+			finalContent = existingHeader + srcContentWithoutHeader
+		} else {
+			finalContent = srcContentStr
+		}
 	} else {
+		// Simply overwrite without preserving headers
 		finalContent = srcContentStr
 	}
 
 	// Ensure file ends with newline
 	if !strings.HasSuffix(finalContent, "\n") {
 		finalContent += "\n"
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create directory for %s: %w", dstPath, err)
 	}
 
 	// Write final content
@@ -458,4 +553,200 @@ func compareReaders(r1, r2 io.Reader) (bool, error) {
 			return false, err2
 		}
 	}
+}
+
+// filesAreEqual compares the content of two files and returns true if they are identical.
+func filesAreEqual(file1, file2 string) (bool, error) {
+	return compareFiles(file1, file2)
+}
+
+// filesAreEqualNormalized compares files with line ending normalization
+func filesAreEqualNormalized(file1, file2 string) (bool, error) {
+	content1, err := readFileNormalized(file1)
+	if err != nil {
+		return false, err
+	}
+
+	content2, err := readFileNormalized(file2)
+	if err != nil {
+		return false, err
+	}
+
+	return content1 == content2, nil
+}
+
+// filesAreEqualNormalizedWithoutHeaders compares files with line ending normalization, ignoring headers
+func filesAreEqualNormalizedWithoutHeaders(file1, file2 string) (bool, error) {
+	content1, err := readFileNormalized(file1)
+	if err != nil {
+		return false, err
+	}
+
+	content2, err := readFileNormalized(file2)
+	if err != nil {
+		return false, err
+	}
+
+	// Remove headers from both files before comparison
+	contentWithoutHeader1 := removeHeaderFromContent(content1)
+	contentWithoutHeader2 := removeHeaderFromContent(content2)
+
+	return contentWithoutHeader1 == contentWithoutHeader2, nil
+}
+
+// readFileNormalized reads file and normalizes line endings
+func readFileNormalized(filePath string) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Normalize line endings - convert to LF
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	// Remove trailing whitespace except newlines, then normalize newlines at the end
+	normalized = strings.TrimRight(normalized, " \t")
+	normalized = strings.TrimRight(normalized, "\n")
+
+	// Add one newline at the end if file is not empty
+	if len(normalized) > 0 {
+		normalized += "\n"
+	}
+
+	return normalized, nil
+}
+
+// copyFileWithHeaderPreservation copies a file, preserving the header of the destination file if it exists.
+// This is for backward compatibility
+func copyFileWithHeaderPreservation(srcPath, dstPath string) error {
+	return copyFile(srcPath, dstPath, true)
+}
+
+// copyFileWithoutHeaderPreservation copies a file, overwriting headers
+func copyFileWithoutHeaderPreservation(srcPath, dstPath string) error {
+	return copyFile(srcPath, dstPath, false)
+}
+
+// getRelativePathInRules gets the relative path of a file within the rules structure
+func getRelativePathInRules(filePath, baseRulesDir string) (string, error) {
+	relativePath, err := filepath.Rel(baseRulesDir, filePath)
+	if err != nil {
+		return "", fmt.Errorf("cannot determine relative path for %s: %w", filePath, err)
+	}
+	return relativePath, nil
+}
+
+// recreateDirectoryStructure ensures the directory structure exists for a file
+func recreateDirectoryStructure(srcPath, srcBase, dstBase string) (string, error) {
+	relativePath, err := filepath.Rel(srcBase, srcPath)
+	if err != nil {
+		return "", fmt.Errorf("cannot determine relative path: %w", err)
+	}
+
+	dstPath := filepath.Join(dstBase, relativePath)
+	dstDir := filepath.Dir(dstPath)
+
+	if err := os.MkdirAll(dstDir, os.ModePerm); err != nil {
+		return "", fmt.Errorf("cannot create directory %s: %w", dstDir, err)
+	}
+
+	return dstPath, nil
+}
+
+// cleanupExtraFiles removes files that exist in destination but not in source
+func cleanupExtraFiles(srcFiles []string, srcBase, dstBase string, patterns []ignorePattern) error {
+	// Build map of source files by relative path
+	srcFilesMap := make(map[string]bool)
+	for _, srcFile := range srcFiles {
+		relativePath, err := filepath.Rel(srcBase, srcFile)
+		if err != nil {
+			continue
+		}
+		srcFilesMap[relativePath] = true
+	}
+
+	// Find all destination files
+	var destFiles []string
+	err := filepath.Walk(dstBase, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			destFiles = append(destFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("error walking destination directory: %w", err)
+	}
+
+	// Filter out ignored files from destination
+	destFiles = filterIgnoredFiles(destFiles, patterns, dstBase)
+
+	// Remove files that don't exist in source
+	for _, destFile := range destFiles {
+		relativePath, err := filepath.Rel(dstBase, destFile)
+		if err != nil {
+			continue
+		}
+
+		if !srcFilesMap[relativePath] {
+			if err := os.Remove(destFile); err != nil {
+				fmt.Fprintf(os.Stderr, "Error deleting file %s: %v\n", relativePath, err)
+			} else {
+				fmt.Printf("%s%s %s%s\n", colorRed, symbolDelete, relativePath, colorReset)
+			}
+		}
+	}
+
+	return nil
+}
+
+// copyFileBasedOnExtension copies a file, applying header preservation only for .mdc files
+func copyFileBasedOnExtension(srcPath, dstPath string, overwriteHeaders bool) error {
+	// Only apply header logic for .mdc files
+	if filepath.Ext(srcPath) == mdcExtension {
+		return copyFile(srcPath, dstPath, !overwriteHeaders)
+	}
+
+	// For non-.mdc files, just copy directly without header processing
+	return copyFileDirectly(srcPath, dstPath)
+}
+
+// copyFileDirectly copies a file without any header processing
+func copyFileDirectly(srcPath, dstPath string) error {
+	// Read source file
+	srcContent, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create directory for %s: %w", dstPath, err)
+	}
+
+	// Write file
+	err = os.WriteFile(dstPath, srcContent, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write destination file %s: %w", dstPath, err)
+	}
+
+	return nil
+}
+
+// filesAreEqualBasedOnExtension compares files, using header-aware comparison only for .mdc files
+func filesAreEqualBasedOnExtension(file1, file2 string, overwriteHeaders bool) (bool, error) {
+	// Only apply header logic for .mdc files
+	if filepath.Ext(file1) == mdcExtension && filepath.Ext(file2) == mdcExtension {
+		if overwriteHeaders {
+			return filesAreEqualNormalized(file1, file2)
+		} else {
+			return filesAreEqualNormalizedWithoutHeaders(file1, file2)
+		}
+	}
+
+	// For non-.mdc files, use simple comparison
+	return filesAreEqualNormalized(file1, file2)
 }
