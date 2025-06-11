@@ -1,6 +1,0 @@
----
-description:
-globs:
-alwaysApply: false
----
-This is a brand new MDC file for testing header overwrite functionality.

@@ -1,7 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: false
----
-This is a MODIFIED test MDC rule content.
-It should now show the difference with overwrite-headers flag.

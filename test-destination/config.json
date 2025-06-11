@@ -1,8 +1,0 @@
-{
-  "name": "test-config",
-  "version": "1.0",
-  "settings": {
-    "debug": true,
-    "verbose": false
-  }
-} 
