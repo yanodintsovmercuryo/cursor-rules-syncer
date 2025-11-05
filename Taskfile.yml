@@ -11,10 +11,12 @@ tasks:
     status:
       - 'test -f {{.DEPS_DIR}}/goimports'
       - 'test -f {{.DEPS_DIR}}/golangci-lint'
+      - 'which mockgen'
     cmds:
       - 'mkdir -p {{.DEPS_DIR}}'
       - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install golang.org/x/tools/cmd/goimports@latest'
       - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest'
+      - 'go install github.com/golang/mock/mockgen@latest'
 
   fmt:
     desc: 'Format Go code and fix imports'
@@ -44,3 +46,8 @@ tasks:
     desc: 'Tidy up go.mod'
     cmds:
       - 'go mod tidy' 
+
+  generate:
+    desc: 'Generate mocks'
+    cmds:
+      - 'go generate ./...'
