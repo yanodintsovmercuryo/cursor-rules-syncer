@@ -10,7 +10,7 @@ func SplitTrimFilter(input, separator string) []string {
 		return []string{}
 	}
 	
-	var result []string
+	result := []string{}
 	for _, part := range strings.Split(input, separator) {
 		trimmed := strings.TrimSpace(part)
 		if trimmed != "" {
@@ -22,8 +22,12 @@ func SplitTrimFilter(input, separator string) []string {
 
 // RemoveDuplicates preserves order while removing duplicates
 func RemoveDuplicates(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+
 	seen := make(map[string]bool)
-	var result []string
+	result := []string{}
 	for _, item := range items {
 		if !seen[item] {
 			seen[item] = true

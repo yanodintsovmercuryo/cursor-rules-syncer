@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/yanodintsovmercuryo/cursor-rules-syncer/models"
+	"github.com/yanodintsovmercuryo/cursync/models"
+	"github.com/yanodintsovmercuryo/cursync/pkg/string_utils"
 )
 
 // PullRules pulls rules from source directory to project .cursor/rules directory
 func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult, error) {
-	rulesSourceDir, err := s.GetRulesSourceDir(options.RulesDir)
+	rulesSourceDir, err := s.getRulesSourceDir(options.RulesDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get rules source dir: %w", err)
 	}
@@ -32,7 +33,7 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 	destRulesDir := filepath.Join(gitRoot, cursorDirName, rulesDirName)
 
 	// Get file patterns for filtering
-	filePatterns, err := s.fileFilterService.GetFilePatterns(options.FilePatterns, cursorRulesPatternsEnvVar)
+	filePatterns, err := s.fileService.GetFilePatterns(options.FilePatterns, cursorRulesPatternsEnvVar)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file patterns: %w", err)
 	}
@@ -45,13 +46,13 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 	var sourceFiles []string
 	if len(filePatterns) == 0 {
 		// No patterns specified - get all files
-		sourceFiles, err = s.findAllFiles(rulesSourceDir)
+		sourceFiles, err = s.fileOps.FindAllFiles(rulesSourceDir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find source files in %s: %w", rulesSourceDir, err)
 		}
 	} else {
 		// Use pattern filtering
-		sourceFiles, err = s.fileFilterService.FindFilesByPatterns(rulesSourceDir, filePatterns)
+		sourceFiles, err = s.fileService.FindFilesByPatterns(rulesSourceDir, filePatterns)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find files by patterns in %s: %w", rulesSourceDir, err)
 		}
@@ -59,15 +60,15 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 
 	// Clean up extra files in destination that don't exist in source
 	// Use pattern-aware cleanup
-	effectivePatterns := s.fileFilterService.GetEffectivePatterns(filePatterns)
+	effectivePatterns := string_utils.RemoveDuplicates(filePatterns)
 	if len(effectivePatterns) == 0 {
 		// No patterns - cleanup all extra files
-		if err := s.cleanupExtraFiles(sourceFiles, rulesSourceDir, destRulesDir, nil); err != nil {
+		if err := s.cleanupExtraFiles(sourceFiles, rulesSourceDir, destRulesDir); err != nil {
 			return nil, fmt.Errorf("failed to cleanup extra files: %w", err)
 		}
 	} else {
 		// Use pattern-aware cleanup
-		if err := s.fileFilterService.CleanupExtraFilesByPatterns(sourceFiles, rulesSourceDir, destRulesDir, effectivePatterns); err != nil {
+		if err := s.fileService.CleanupExtraFilesByPatterns(sourceFiles, rulesSourceDir, destRulesDir, effectivePatterns); err != nil {
 			return nil, fmt.Errorf("failed to cleanup extra files: %w", err)
 		}
 	}
@@ -81,11 +82,11 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 	for _, srcFileFullPath := range sourceFiles {
 		dstFileFullPath, err := s.pathUtils.RecreateDirectoryStructure(srcFileFullPath, rulesSourceDir, destRulesDir)
 		if err != nil {
-			s.outputService.PrintErrorf("Error recreating directory structure for %s: %v\n", srcFileFullPath, err)
+			s.output.PrintErrorf("Error recreating directory structure for %s: %v\n", srcFileFullPath, err)
 			continue
 		}
 
-		// Получить относительный путь для отображения
+		// Get relative path for display
 		relativePath, err := s.pathUtils.GetRelativePath(srcFileFullPath, rulesSourceDir)
 		if err != nil {
 			relativePath = s.pathUtils.GetBaseName(srcFileFullPath)
@@ -95,16 +96,16 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 		if _, err := s.fileOps.Stat(dstFileFullPath); os.IsNotExist(err) {
 			fileExistedBeforeCopy = false
 		} else if err != nil {
-			s.outputService.PrintErrorf("Error checking destination file %s: %v\n", relativePath, err)
+			s.output.PrintErrorf("Error checking destination file %s: %v\n", relativePath, err)
 			continue
 		}
 
 		// Check if files are different before copying
 		shouldCopy := true
 		if fileExistedBeforeCopy {
-			equal, err := s.filesAreEqualBasedOnExtension(srcFileFullPath, dstFileFullPath, options.OverwriteHeaders)
+			equal, err := s.fileService.AreEqual(srcFileFullPath, dstFileFullPath, options.OverwriteHeaders)
 			if err != nil {
-				s.outputService.PrintErrorf("Error comparing files %s: %v\n", relativePath, err)
+				s.output.PrintErrorf("Error comparing files %s: %v\n", relativePath, err)
 				// Continue with copying in case of comparison error
 			} else if equal {
 				shouldCopy = false // Files are identical, no need to copy
@@ -112,15 +113,15 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 		}
 
 		if shouldCopy {
-			copyErr := s.copyFileBasedOnExtension(srcFileFullPath, dstFileFullPath, options.OverwriteHeaders)
+			copyErr := s.fileService.Copy(srcFileFullPath, dstFileFullPath, options.OverwriteHeaders)
 			if copyErr != nil {
-				s.outputService.PrintErrorf("Error synchronizing file %s: %v\n", relativePath, copyErr)
+				s.output.PrintErrorf("Error synchronizing file %s: %v\n", relativePath, copyErr)
 			} else {
 				operationType := "update"
 				if !fileExistedBeforeCopy {
 					operationType = "add"
 				}
-				s.outputService.PrintOperation(operationType, relativePath)
+				s.output.PrintOperation(operationType, relativePath)
 
 				result.Operations = append(result.Operations, models.FileOperation{
 					Type:         models.OperationType(operationType),
@@ -134,9 +135,4 @@ func (s *SyncService) PullRules(options *models.SyncOptions) (*models.SyncResult
 	}
 
 	return result, nil
-}
-
-// findAllFiles находит все файлы в указанной директории рекурсивно
-func (s *SyncService) findAllFiles(dir string) ([]string, error) {
-	return s.fileOps.FindAllFiles(dir)
 }

@@ -4,6 +4,10 @@ vars:
   BINARY_NAME: 'cursor-rules-syncer'
   BUILD_DIR: '.build'
   DEPS_DIR: '.build/deps'
+  GOIMPORTS_VERSION: 'v0.38.0'
+  GOLANGCI_LINT_VERSION: 'v1.64.8'
+  GOTESTSUM_VERSION: 'v1.13.0'
+  MOCKGEN_VERSION: 'latest'
 
 tasks:
   deps:
@@ -11,12 +15,14 @@ tasks:
     status:
       - 'test -f {{.DEPS_DIR}}/goimports'
       - 'test -f {{.DEPS_DIR}}/golangci-lint'
+      - 'test -f {{.DEPS_DIR}}/gotestsum'
       - 'which mockgen'
     cmds:
       - 'mkdir -p {{.DEPS_DIR}}'
-      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install golang.org/x/tools/cmd/goimports@latest'
-      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest'
-      - 'go install github.com/golang/mock/mockgen@latest'
+      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install golang.org/x/tools/cmd/goimports@{{.GOIMPORTS_VERSION}}'
+      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install github.com/golangci/golangci-lint/cmd/golangci-lint@{{.GOLANGCI_LINT_VERSION}}'
+      - 'GOBIN={{.PWD}}/{{.DEPS_DIR}} go install gotest.tools/gotestsum@{{.GOTESTSUM_VERSION}}'
+      - 'go install github.com/golang/mock/mockgen@{{.MOCKGEN_VERSION}}'
 
   fmt:
     desc: 'Format Go code and fix imports'
@@ -38,9 +44,10 @@ tasks:
       - 'go build -o {{.BUILD_DIR}}/{{.BINARY_NAME}} .'
 
   test:
-    desc: 'Run tests'
+    desc: 'Run tests with gotestsum'
+    deps: ['deps']
     cmds:
-      - 'go test -v ./...'
+      - 'gotestsum --format testname -- -v ./...'
 
   tidy:
     desc: 'Tidy up go.mod'

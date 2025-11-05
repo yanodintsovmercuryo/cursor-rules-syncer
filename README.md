@@ -1,226 +1,151 @@
-# Cursor Rules Syncer
+# cursync
 
-A command-line tool to help synchronize [Cursor](https://cursor.sh) IDE's AI rules (`.mdc` files) between a central rules repository and your individual project repositories.
+A CLI tool for synchronizing Cursor IDE rules between a source directory and git project's `.cursor/rules` directory. The tool provides bidirectional synchronization (`pull` and `push` commands) with support for file pattern filtering, YAML header preservation, and automatic git commit management.
 
-It allows you to maintain a canonical set of rules in one place and easily `pull` them into any project, or `push` local project-specific rule modifications back to the central repository.
+## Running components
 
-## Prerequisites
+- **cursync** - CLI binary that provides `pull` and `push` commands for rules synchronization
 
-*   Go 1.21 or higher installed.
-*   Git installed and configured in your PATH.
-*   An environment variable `CURSOR_RULES_DIR` set to the absolute path of your central Git repository for Cursor rules.
-    
-    Example:
-    ```bash
-    export CURSOR_RULES_DIR="/Users/yourname/path/to/your/central-cursor-rules-repo"
-    ```
-    It's recommended to add this export to your shell's configuration file (e.g., `.zshrc`, `.bashrc`).
+## Dependencies
 
-## Installation
+### Infrastructure
 
-To install the `cursor-rules-syncer` CLI, run:
+- **Git repository** - Required for detecting project root and committing changes
+- **File system** - Read/write access to source and destination directories
 
-```bash
-go install github.com/yanodintsovmercuryo/cursor-rules-syncer@latest
-```
+### External API
 
-This will download the source code, compile it, and place the executable in your `$GOPATH/bin` or `$GOBIN` directory. Ensure this directory is in your system's `PATH`.
-
-Alternatively, you can build from source:
-1. Clone this repository.
-2. Navigate to the repository directory.
-3. Run `go build .` or `task build`. This will create a `cursor-rules-syncer` executable.
-
-## Usage
-
-Once installed and `CURSOR_RULES_DIR` is set, you can use the tool from any directory within a Git project.
-
-### Command Line Options
-
-#### Global Flags
-*   `--rules-dir <path>` - Specify rules directory path (overrides `CURSOR_RULES_DIR` environment variable)
-*   `--ignore-files <file1,file2>` - Comma-separated list of files to ignore during sync
-*   `--overwrite-headers` - Overwrite YAML headers instead of preserving them (default: preserve headers)
-
-#### Push-specific Flags
-*   `--git-without-push` - Commit changes but don't push to remote repository
-
-### Pull Rules
-
-To pull the latest rules from your central `CURSOR_RULES_DIR` into the current project:
-
-```bash
-cursor-rules-syncer pull
-```
-
-You can also specify a different rules directory:
-
-```bash
-cursor-rules-syncer pull --rules-dir /path/to/other/rules
-```
-
-This will:
-1. Read the `CURSOR_RULES_DIR` environment variable.
-2. Find the root of the current Git project.
-3. Create a `.cursor/rules` directory in the project root if it doesn't exist.
-4. **Recursively** copy all files from `CURSOR_RULES_DIR` to `.cursor/rules`, preserving directory structure and headers of existing `.mdc` files in the project (unless `--overwrite-headers` is used).
-5. Delete any extra files in the project that don't exist in the source.
-
-### Push Rules
-
-To push local rule changes from the current project's `.cursor/rules` directory back to your central `CURSOR_RULES_DIR`:
-
-```bash
-cursor-rules-syncer push
-```
-
-To commit changes without pushing to remote:
-
-```bash
-cursor-rules-syncer push --git-without-push
-```
-
-To overwrite headers instead of preserving them:
-
-```bash
-cursor-rules-syncer push --overwrite-headers
-```
-
-This will:
-1. Read the `CURSOR_RULES_DIR` environment variable.
-2. Find the root of the current Git project.
-3. **Recursively** copy all files from the project's `.cursor/rules` directory to `CURSOR_RULES_DIR`, preserving directory structure and headers of existing `.mdc` files in the central repository (unless `--overwrite-headers` is used).
-4. Delete any extra files in the central repository that don't exist in the project.
-5. Change to the `CURSOR_RULES_DIR` Git repository.
-6. Execute `git add .`.
-7. Execute `git commit -m "Sync cursor rules: updated from project [current_project_name]"`.
-8. Execute `git push` (only if `origin` remote exists).
+- **Git CLI** - Required for git operations (commit, push)
 
 ## Features
 
-*   **Smart Synchronization:** Only copies files that have actually changed, reducing unnecessary operations.
-*   **Recursive Directory Support:** Processes all files in subdirectories, preserving directory structure.
-*   **Header Preservation:** Preserves YAML frontmatter (header block between `---` lines) of existing `.mdc` files by default, with option to overwrite using `--overwrite-headers`. Non-.mdc files are copied as-is.
-*   **Advanced File Filtering:** Support for `.ruleignore` file with gitignore-style patterns (wildcards, negation with `!`, directory patterns) and `--ignore-files` flag.
-*   **Color-coded Output:** Shows operation status with colored indicators:
-    *   🟢 `+` - Added files
-    *   🟡 `*` - Updated files  
-    *   🔴 `-` - Deleted files
-*   **Safe Operations:** Only shows updates when content actually differs.
-*   **Auto-cleanup:** Removes extra files in destination that don't exist in source.
-*   **Git Integration:** Automatically commits and pushes changes when using `push` command.
+### Pull Command
 
-## File Filtering
+Pulls rules from a source directory to the current git project's `.cursor/rules` directory:
 
-### .ruleignore File
+- Synchronizes files from source to project directory
+- Deletes extra files in project directory that don't exist in source
+- Supports file pattern filtering via `--file-patterns` flag or `CURSOR_RULES_PATTERNS` environment variable
+- Preserves or overwrites YAML headers based on `--overwrite-headers` flag
+- Skips copying identical files
 
-You can create a `.ruleignore` file in your rules source directory to specify files that should be excluded from synchronization. The format follows gitignore-style patterns with support for wildcards, directory patterns, and negation:
+### Push Command
 
-```
-# Comments start with #
-# Empty lines are ignored
+Pushes rules from the current git project's `.cursor/rules` directory to the source directory:
 
-# Ignore specific files
-secret-rules.mdc
-experimental.mdc
+- Synchronizes files from project to source directory
+- Deletes extra files in source directory that don't exist in project
+- Supports file pattern filtering
+- Automatically commits changes to git repository
+- Optional `--git-without-push` flag to commit without pushing
 
-# Ignore all files in specific directories
-temp/
-drafts/
+### Configuration
 
-# Ignore files with specific patterns
-*.backup.mdc
-test-*.mdc
+- **`--rules-dir` / `-d`** - Path to rules directory (overrides `CURSOR_RULES_DIR` env var)
+- **`--file-patterns` / `-p`** - Comma-separated file patterns (e.g., `local_*.mdc,translate/*.md`) (overrides `CURSOR_RULES_PATTERNS` env var)
+- **`--overwrite-headers` / `-o`** - Overwrite headers instead of preserving them
+- **`--git-without-push` / `-w`** - Commit changes but don't push to remote (push command only)
 
-# Use wildcards for subdirectories
-**/private/**
-**/temp/**/*.mdc
+### Environment Variables
 
-# Negation patterns (include files that would otherwise be ignored)
-!important.mdc
-!**/public/**/*.mdc
-```
+- **`CURSOR_RULES_DIR`** - Default source directory path for rules
+- **`CURSOR_RULES_PATTERNS`** - Default file patterns for filtering
 
-### Command Line Filtering
-
-You can also specify files to ignore using the `--ignore-files` flag:
+## Usage Examples
 
 ```bash
-cursor-rules-syncer pull --ignore-files "secret.mdc,temp.mdc"
-cursor-rules-syncer push --ignore-files "experimental.mdc"
+# Pull rules from source directory to project
+cursync pull --rules-dir ~/my-rules
+
+# Pull with file pattern filtering
+cursync pull -d ~/my-rules -p "local_*.mdc"
+
+# Push rules from project to source directory
+cursync push --rules-dir ~/my-rules
+
+# Push without git push
+cursync push -d ~/my-rules -w
+
+# Overwrite headers during sync
+cursync pull -d ~/my-rules -o
 ```
-
-### Conflict Detection
-
-When using `pull`, if any ignored files exist in the destination project, the operation will fail with an error. This prevents accidental conflicts. You must either:
-- Remove the conflicting files from the project
-- Update your `.ruleignore` file to exclude them
-
-## Header Preservation
-
-The tool identifies a header as the content between two `---` lines at the very beginning of an `.mdc` file. For example:
-
-```yaml
----
-description: My rule description
-globs: 
-  - "src/**/*.js"
-alwaysApply: false
----
-
-This is the actual rule content that will be executed by Cursor...
-```
-
-When a file is copied:
-*   If the destination file exists and has such a header, this header is kept.
-*   The content of the source file (excluding its own header, if `existingHeader` was preserved from destination) is then appended after the preserved header in the destination file.
-*   If the destination file does not exist or does not have a valid header, the entire source file (including its header, if any) is copied.
-
----
 
 ## Development
 
-This section is for developers who want to contribute to or modify the project.
+### Prerequisites
 
-### Build Requirements
+- Go 1.23+
+- Task runner (for using Taskfile.yml)
 
-- [Task](https://taskfile.dev/) - Task runner for development commands
-- Go 1.21+
-- Git
+### Building
 
-### Development Commands
+```bash
+task build
+```
 
-#### `task deps`
-Installs development dependencies (`goimports`, `golangci-lint`) to `.build/deps/`.
-Runs automatically when other commands need dependencies and only re-runs if dependency files are missing.
+### Running Tests
 
-#### `task fmt` 
-Formats code using `goimports` and `gofmt`:
-- Fixes imports
-- Formats code according to Go standards
+```bash
+task test
+```
 
-#### `task lint`
-Runs `golangci-lint` with automatic fixes for common issues.
+### Formatting and Linting
 
-#### `task build`
-Builds the application to `.build/cursor-rules-syncer`.
+```bash
+task fmt
+task lint
+```
 
-#### `task test` 
-Runs all project tests.
+### Generating Mocks
 
-#### `task tidy`
-Cleans up and updates `go.mod`.
+```bash
+task generate
+```
 
-### Development Workflow
+## Architecture & Flow
 
-1. Install dependencies: `task deps`
-2. Make your changes
-3. Format and lint: `task fmt && task lint`
-4. Test: `task test`
-5. Build: `task build`
+The tool follows a clean architecture pattern with separation of concerns:
 
-## Contributing
+- **`pkg/`** - Static utilities without dependencies (file operations, path utilities, git operations, output formatting)
+- **`service/`** - Business logic with dependencies:
+  - **`service/file/`** - File operations facade (comparator, copier, filter sub-services)
+  - **`service/sync/`** - Main synchronization service orchestrating pull/push operations
+- **`models/`** - Data structures and types
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
-ƒ
+### Synchronization Flow
+
+1. **Pull Flow:**
+   - Get rules source directory from flag or env var
+   - Detect git root directory
+   - Find source files (with optional pattern filtering)
+   - Clean up extra files in destination
+   - Copy files maintaining directory structure
+   - Skip identical files
+
+2. **Push Flow:**
+   - Get rules source directory from flag or env var
+   - Detect git root directory
+   - Verify project `.cursor/rules` directory exists
+   - Find project files (with optional pattern filtering)
+   - Clean up extra files in source directory
+   - Copy files maintaining directory structure
+   - Commit changes to git repository (with optional push)
+
+## Troubleshooting Guide
+
+### "rules directory not specified" error
+
+Ensure either `--rules-dir` flag is provided or `CURSOR_RULES_DIR` environment variable is set.
+
+### "failed to find git root" error
+
+The tool searches recursively for either a `.git` directory or `.cursor` folder starting from the current directory. Ensure you're running the command from within a git repository or a directory containing a `.cursor` folder.
+
+### "project rules directory not found" error (push command)
+
+The push command requires the project's `.cursor/rules` directory to exist. Create it first if needed.
+
+### Git commit failures
+
+Check git repository status and ensure you have proper permissions. The tool will continue synchronization even if commit fails, but will display an error message.
 

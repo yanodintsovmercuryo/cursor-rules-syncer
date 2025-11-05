@@ -1,3 +1,4 @@
+//go:generate mockgen -source=file_ops.go -destination=mocks/mocks.go -package=mocks
 package file_ops
 
 import (
@@ -7,29 +8,16 @@ import (
 	"strings"
 )
 
-// FileOps определяет интерфейс для файловых операций
-type FileOps interface {
-	FindAllFiles(dir string) ([]string, error)
-	ReadFileNormalized(filePath string) (string, error)
-	WriteFile(filePath, content string, perm os.FileMode) error
-	FileExists(filePath string) (bool, error)
-	CopyFile(srcPath, dstPath string) error
-	RemoveFile(filePath string) error
-	MkdirAll(path string, perm os.FileMode) error
-	GetCurrentDir() (string, error)
-	Stat(filePath string) (os.FileInfo, error)
+// FileOps handles file operations
+type FileOps struct{}
+
+// NewFileOps creates a new FileOps instance
+func NewFileOps() *FileOps {
+	return &FileOps{}
 }
 
-// fileOps структура для файловых операций
-type fileOps struct{}
-
-// NewFileOps создает новый экземпляр FileOps
-func NewFileOps() FileOps {
-	return &fileOps{}
-}
-
-// FindAllFiles находит все файлы в указанной директории рекурсивно
-func (f *fileOps) FindAllFiles(dir string) ([]string, error) {
+// FindAllFiles finds all files in the specified directory recursively
+func (f *FileOps) FindAllFiles(dir string) ([]string, error) {
 	var allFiles []string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -46,8 +34,8 @@ func (f *fileOps) FindAllFiles(dir string) ([]string, error) {
 	return allFiles, nil
 }
 
-// ReadFileNormalized читает файл и нормализует переносы строк
-func (f *fileOps) ReadFileNormalized(filePath string) (string, error) {
+// ReadFileNormalized reads a file and normalizes line endings
+func (f *FileOps) ReadFileNormalized(filePath string) (string, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err
@@ -69,8 +57,8 @@ func (f *fileOps) ReadFileNormalized(filePath string) (string, error) {
 	return normalized, nil
 }
 
-// WriteFile создает директорию если нужно и записывает содержимое в файл
-func (f *fileOps) WriteFile(filePath, content string, perm os.FileMode) error {
+// WriteFile creates directory if needed and writes content to file
+func (f *FileOps) WriteFile(filePath, content string, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(filePath), perm); err != nil {
 		return fmt.Errorf("failed to create directory for %s: %w", filePath, err)
 	}
@@ -82,8 +70,8 @@ func (f *fileOps) WriteFile(filePath, content string, perm os.FileMode) error {
 	return nil
 }
 
-// FileExists проверяет существование файла
-func (f *fileOps) FileExists(filePath string) (bool, error) {
+// FileExists checks if file exists
+func (f *FileOps) FileExists(filePath string) (bool, error) {
 	_, err := os.Stat(filePath)
 	if err == nil {
 		return true, nil
@@ -94,8 +82,8 @@ func (f *fileOps) FileExists(filePath string) (bool, error) {
 	return false, err
 }
 
-// CopyFile копирует файл из источника в назначение
-func (f *fileOps) CopyFile(srcPath, dstPath string) error {
+// CopyFile copies file from source to destination
+func (f *FileOps) CopyFile(srcPath, dstPath string) error {
 	content, err := os.ReadFile(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
@@ -113,22 +101,22 @@ func (f *fileOps) CopyFile(srcPath, dstPath string) error {
 	return nil
 }
 
-// RemoveFile удаляет файл
-func (f *fileOps) RemoveFile(filePath string) error {
+// RemoveFile removes a file
+func (f *FileOps) RemoveFile(filePath string) error {
 	return os.Remove(filePath)
 }
 
-// MkdirAll создает директорию со всеми необходимыми родительскими директориями
-func (f *fileOps) MkdirAll(path string, perm os.FileMode) error {
+// MkdirAll creates directory with all necessary parent directories
+func (f *FileOps) MkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
-// GetCurrentDir возвращает текущую рабочую директорию
-func (f *fileOps) GetCurrentDir() (string, error) {
+// GetCurrentDir returns current working directory
+func (f *FileOps) GetCurrentDir() (string, error) {
 	return os.Getwd()
 }
 
-// Stat возвращает информацию о файле
-func (f *fileOps) Stat(filePath string) (os.FileInfo, error) {
+// Stat returns file information
+func (f *FileOps) Stat(filePath string) (os.FileInfo, error) {
 	return os.Stat(filePath)
 }

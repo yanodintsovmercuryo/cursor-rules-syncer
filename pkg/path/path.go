@@ -4,21 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// pathUtils структура для работы с путями
+// PathUtils handles path operations
 type PathUtils struct{}
 
-// NewPathUtils создает новый экземпляр PathUtils
+// NewPathUtils creates a new PathUtils instance
 func NewPathUtils() *PathUtils {
 	return &PathUtils{}
 }
 
-// RecreateDirectoryStructure воссоздает структуру директорий для файла назначения
+// RecreateDirectoryStructure recreates directory structure for destination file
 func (p *PathUtils) RecreateDirectoryStructure(srcPath, srcBase, dstBase string) (string, error) {
-	relativePath, err := filepath.Rel(srcBase, srcPath)
+	relativePath, err := p.GetRelativePath(srcPath, srcBase)
 	if err != nil {
-		return "", fmt.Errorf("cannot determine relative path: %w", err)
+		return "", err
 	}
 
 	dstPath := filepath.Join(dstBase, relativePath)
@@ -31,22 +32,35 @@ func (p *PathUtils) RecreateDirectoryStructure(srcPath, srcBase, dstBase string)
 	return dstPath, nil
 }
 
-// GetRelativePath возвращает относительный путь файла от базовой директории
+// GetRelativePath returns relative path of file from base directory
 func (p *PathUtils) GetRelativePath(filePath, baseDir string) (string, error) {
-	return filepath.Rel(baseDir, filePath)
+	rel, err := filepath.Rel(baseDir, filePath)
+	if err != nil {
+		return "", fmt.Errorf("cannot determine relative path: %w", err)
+	}
+
+	// Check that path is truly relative (doesn't contain ".." at the beginning)
+	if len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator) {
+		return "", fmt.Errorf("file path %s is not within base directory %s", filePath, baseDir)
+	}
+
+	return rel, nil
 }
 
-// NormalizePath нормализует путь для использования в кроссплатформенных путях
+// NormalizePath normalizes path for cross-platform use
 func (p *PathUtils) NormalizePath(filePath string) string {
-	return filepath.ToSlash(filePath)
+	normalized := filepath.ToSlash(filePath)
+	// Additional normalization to ensure backslash conversion
+	normalized = strings.ReplaceAll(normalized, "\\", "/")
+	return normalized
 }
 
-// GetDirectory возвращает директорию файла
+// GetDirectory returns file directory
 func (p *PathUtils) GetDirectory(filePath string) string {
 	return filepath.Dir(filePath)
 }
 
-// GetBaseName возвращает базовое имя файла (без директории)
+// GetBaseName returns base file name (without directory)
 func (p *PathUtils) GetBaseName(filePath string) string {
 	return filepath.Base(filePath)
 }
