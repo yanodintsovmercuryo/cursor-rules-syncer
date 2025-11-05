@@ -34,4 +34,3 @@ func (p *PatternFilterService) FilterFilesByPatterns(files []string, baseDir str
 
 	return filtered
 }
-

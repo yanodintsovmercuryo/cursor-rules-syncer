@@ -9,7 +9,7 @@ func SplitTrimFilter(input, separator string) []string {
 	if input == "" {
 		return []string{}
 	}
-	
+
 	result := []string{}
 	for _, part := range strings.Split(input, separator) {
 		trimmed := strings.TrimSpace(part)

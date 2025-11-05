@@ -16,4 +16,3 @@ func NewPatternFilterService(pathUtils pathUtils) *PatternFilterService {
 		pathUtils: pathUtils,
 	}
 }
-

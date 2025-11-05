@@ -6,24 +6,63 @@ import (
 	"path/filepath"
 
 	"github.com/yanodintsovmercuryo/cursync/models"
-	"github.com/yanodintsovmercuryo/cursync/pkg/string_utils"
 )
 
 // PushRules pushes rules from project .cursor/rules directory to source directory
 func (s *SyncService) PushRules(options *models.SyncOptions) (*models.SyncResult, error) {
-	rulesEnvDir, err := s.getRulesSourceDir(options.RulesDir)
+	rulesEnvDir, rulesSourceDirInProject, projectGitRoot, err := s.preparePushPaths(options.RulesDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get rules source dir: %w", err)
+		return nil, err
+	}
+
+	if validateErr := s.validateRulesDirectory(rulesSourceDirInProject); validateErr != nil {
+		return nil, validateErr
+	}
+
+	filePatterns, err := s.fileService.GetFilePatterns(options.FilePatterns, cursorRulesPatternsEnvVar)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file patterns: %w", err)
+	}
+
+	projectFiles, err := s.findFilesWithPatterns(rulesSourceDirInProject, filePatterns)
+	if err != nil {
+		return nil, err
+	}
+
+	if mkdirErr := s.fileOps.MkdirAll(rulesEnvDir, os.ModePerm); mkdirErr != nil {
+		return nil, fmt.Errorf("failed to create destination directory %s: %w", rulesEnvDir, mkdirErr)
+	}
+
+	if err := s.cleanupExtraFilesWithPatterns(projectFiles, rulesSourceDirInProject, rulesEnvDir, filePatterns); err != nil {
+		return nil, err
+	}
+
+	result := s.copyFilesForPush(projectFiles, rulesSourceDirInProject, rulesEnvDir, options.OverwriteHeaders)
+
+	if result.HasChanges {
+		if err := s.gitOps.CommitChanges(rulesEnvDir, "Sync cursor rules: updated from project "+s.pathUtils.GetBaseName(projectGitRoot), options.GitWithoutPush); err != nil {
+			s.output.PrintErrorf("Commit failed for %s: %v\n", rulesEnvDir, err)
+		}
+	}
+
+	return result, nil
+}
+
+// preparePushPaths prepares paths for push operation
+func (s *SyncService) preparePushPaths(rulesDir string) (string, string, string, error) {
+	rulesEnvDir, err := s.getRulesSourceDir(rulesDir)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get rules source dir: %w", err)
 	}
 
 	currentDir, err := s.fileOps.GetCurrentDir()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get current directory: %w", err)
+		return "", "", "", fmt.Errorf("failed to get current directory: %w", err)
 	}
 
 	projectGitRoot, err := s.gitOps.GetGitRootDir(currentDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find git root for project: %w", err)
+		return "", "", "", fmt.Errorf("failed to find git root for project: %w", err)
 	}
 
 	const (
@@ -32,123 +71,92 @@ func (s *SyncService) PushRules(options *models.SyncOptions) (*models.SyncResult
 	)
 	rulesSourceDirInProject := filepath.Join(projectGitRoot, cursorDirName, rulesDirName)
 
-	if exists, _ := s.fileOps.FileExists(rulesSourceDirInProject); !exists {
-		return nil, fmt.Errorf("project rules directory %s not found. Nothing to push", rulesSourceDirInProject)
-	}
+	return rulesEnvDir, rulesSourceDirInProject, projectGitRoot, nil
+}
 
-	// Get file patterns for filtering
-	filePatterns, err := s.fileService.GetFilePatterns(options.FilePatterns, cursorRulesPatternsEnvVar)
+// validateRulesDirectory checks if rules directory exists in project
+func (s *SyncService) validateRulesDirectory(rulesSourceDirInProject string) error {
+	exists, err := s.fileOps.FileExists(rulesSourceDirInProject)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file patterns: %w", err)
+		return fmt.Errorf("failed to check if rules directory exists: %w", err)
 	}
-
-	// Find project files with pattern filtering
-	var projectFiles []string
-	if len(filePatterns) == 0 {
-		// No patterns specified - get all files
-		projectFiles, err = s.fileOps.FindAllFiles(rulesSourceDirInProject)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find files in project rules directory %s: %w", rulesSourceDirInProject, err)
-		}
-	} else {
-		// Use pattern filtering
-		projectFiles, err = s.fileService.FindFilesByPatterns(rulesSourceDirInProject, filePatterns)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find files by patterns in project rules directory %s: %w", rulesSourceDirInProject, err)
-		}
+	if !exists {
+		return fmt.Errorf("project rules directory %s not found. Nothing to push", rulesSourceDirInProject)
 	}
+	return nil
+}
 
-	if mkdirErr := s.fileOps.MkdirAll(rulesEnvDir, os.ModePerm); mkdirErr != nil {
-		return nil, fmt.Errorf("failed to create destination directory %s: %w", rulesEnvDir, mkdirErr)
-	}
-
-	// Clean up extra files in destination that don't exist in source
-	// Use pattern-aware cleanup
-	effectivePatterns := string_utils.RemoveDuplicates(filePatterns)
-	if len(effectivePatterns) == 0 {
-		// No patterns - cleanup all extra files
-		if err := s.cleanupExtraFiles(projectFiles, rulesSourceDirInProject, rulesEnvDir); err != nil {
-			return nil, fmt.Errorf("failed to cleanup extra files: %w", err)
-		}
-	} else {
-		// Use pattern-aware cleanup
-		if err := s.fileService.CleanupExtraFilesByPatterns(projectFiles, rulesSourceDirInProject, rulesEnvDir, effectivePatterns); err != nil {
-			return nil, fmt.Errorf("failed to cleanup extra files: %w", err)
-		}
-	}
-
+// copyFilesForPush copies files from project to source directory
+func (s *SyncService) copyFilesForPush(projectFiles []string, srcBase, dstBase string, overwriteHeaders bool) *models.SyncResult {
 	result := &models.SyncResult{
 		Operations: []models.FileOperation{},
 		HasChanges: false,
 	}
 
 	if len(projectFiles) == 0 {
-		// No files to process, but we might have deleted some files above
-		return result, nil
+		return result
 	}
 
-	// Copy files with proper directory structure
 	for _, srcFileFullPath := range projectFiles {
-		dstFileFullPath, err := s.pathUtils.RecreateDirectoryStructure(srcFileFullPath, rulesSourceDirInProject, rulesEnvDir)
+		dstFileFullPath, err := s.pathUtils.RecreateDirectoryStructure(srcFileFullPath, srcBase, dstBase)
 		if err != nil {
 			s.output.PrintErrorf("Error recreating directory structure for %s: %v\n", srcFileFullPath, err)
 			continue
 		}
 
-		// Get relative path for display
-		relativePath, err := s.pathUtils.GetRelativePath(srcFileFullPath, rulesSourceDirInProject)
+		relativePath, err := s.pathUtils.GetRelativePath(srcFileFullPath, srcBase)
 		if err != nil {
 			relativePath = s.pathUtils.GetBaseName(srcFileFullPath)
 		}
 
-		fileExists := true
-		if exists, err := s.fileOps.FileExists(dstFileFullPath); err != nil {
-			s.output.PrintErrorf("Error checking destination file %s in %s: %v\n", relativePath, rulesEnvDir, err)
+		fileExists, err := s.checkFileExistsForPush(dstFileFullPath, relativePath, dstBase)
+		if err != nil {
 			continue
-		} else if !exists {
-			fileExists = false
 		}
 
-		// Check if files are different before copying
-		shouldCopy := true
-		if fileExists {
-			equal, err := s.fileService.AreEqual(srcFileFullPath, dstFileFullPath, options.OverwriteHeaders)
-			if err != nil {
-				s.output.PrintErrorf("Error comparing files %s: %v\n", relativePath, err)
-				// Continue with copying in case of comparison error
-			} else if equal {
-				shouldCopy = false // Files are identical, no need to copy
-			}
+		shouldCopy := s.shouldCopyFile(srcFileFullPath, dstFileFullPath, fileExists, overwriteHeaders, relativePath)
+		if !shouldCopy {
+			continue
 		}
 
-		if shouldCopy {
-			copyErr := s.fileService.Copy(srcFileFullPath, dstFileFullPath, options.OverwriteHeaders)
-			if copyErr != nil {
-				s.output.PrintErrorf("Error synchronizing file %s to %s: %v\n", relativePath, rulesEnvDir, copyErr)
-			} else {
-				operationType := "update"
-				if !fileExists {
-					operationType = "add"
-				}
-				s.output.PrintOperationWithTarget(operationType, relativePath, s.pathUtils.GetBaseName(rulesEnvDir))
-
-				result.Operations = append(result.Operations, models.FileOperation{
-					Type:         models.OperationType(operationType),
-					SourcePath:   srcFileFullPath,
-					TargetPath:   dstFileFullPath,
-					RelativePath: relativePath,
-				})
-				result.HasChanges = true
-			}
+		if s.copySingleFileForPush(srcFileFullPath, dstFileFullPath, relativePath, fileExists, overwriteHeaders, dstBase, result) {
+			result.HasChanges = true
 		}
 	}
 
-	// Commit only if there are changes
-	if result.HasChanges {
-		if err := s.gitOps.CommitChanges(rulesEnvDir, "Sync cursor rules: updated from project "+s.pathUtils.GetBaseName(projectGitRoot), options.GitWithoutPush); err != nil {
-			s.output.PrintErrorf("Commit failed for %s: %v\n", rulesEnvDir, err)
-		}
+	return result
+}
+
+// checkFileExistsForPush checks if destination file exists for push operation
+func (s *SyncService) checkFileExistsForPush(dstFileFullPath, relativePath, dstBase string) (bool, error) {
+	exists, err := s.fileOps.FileExists(dstFileFullPath)
+	if err != nil {
+		s.output.PrintErrorf("Error checking destination file %s in %s: %v\n", relativePath, dstBase, err)
+		return false, err
+	}
+	return exists, nil
+}
+
+// copySingleFileForPush copies a single file for push operation
+func (s *SyncService) copySingleFileForPush(srcFileFullPath, dstFileFullPath, relativePath string, fileExists, overwriteHeaders bool, dstBase string, result *models.SyncResult) bool {
+	copyErr := s.fileService.Copy(srcFileFullPath, dstFileFullPath, overwriteHeaders)
+	if copyErr != nil {
+		s.output.PrintErrorf("Error synchronizing file %s to %s: %v\n", relativePath, dstBase, copyErr)
+		return false
 	}
 
-	return result, nil
+	operationType := "update"
+	if !fileExists {
+		operationType = "add"
+	}
+	s.output.PrintOperationWithTarget(operationType, relativePath, s.pathUtils.GetBaseName(dstBase))
+
+	result.Operations = append(result.Operations, models.FileOperation{
+		Type:         models.OperationType(operationType),
+		SourcePath:   srcFileFullPath,
+		TargetPath:   dstFileFullPath,
+		RelativePath: relativePath,
+	})
+
+	return true
 }

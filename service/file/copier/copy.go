@@ -26,9 +26,9 @@ func (c *Copier) copyFile(srcPath, dstPath string, preserveHeaders bool) error {
 	var finalContent string
 
 	if preserveHeaders {
-		existingHeader, err := c.extractExistingHeader(dstPath)
-		if err != nil {
-			return err
+		existingHeader, extractErr := c.extractExistingHeader(dstPath)
+		if extractErr != nil {
+			return extractErr
 		}
 
 		if existingHeader != "" {

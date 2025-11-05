@@ -9,6 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testEnvVarName = "TEST_PATTERNS"
+	testDir        = "/test"
+)
+
 func TestFilter_GetFilePatterns(t *testing.T) {
 	t.Run("from flag", func(t *testing.T) {
 		t.Parallel()
@@ -16,7 +21,7 @@ func TestFilter_GetFilePatterns(t *testing.T) {
 		defer finish()
 
 		flagValue := "*.txt,*.md"
-		envVarName := "TEST_PATTERNS"
+		envVarName := testEnvVarName
 
 		result, err := f.filter.GetFilePatterns(flagValue, envVarName)
 		require.NoError(t, err)
@@ -33,7 +38,7 @@ func TestFilter_GetFilePatterns(t *testing.T) {
 		defer finish()
 
 		flagValue := ""
-		envVarName := "TEST_PATTERNS"
+		envVarName := testEnvVarName
 		os.Setenv(envVarName, "*.txt,*.md")
 		defer os.Unsetenv(envVarName)
 
@@ -52,7 +57,7 @@ func TestFilter_GetFilePatterns(t *testing.T) {
 		defer finish()
 
 		flagValue := ""
-		envVarName := "TEST_PATTERNS"
+		envVarName := testEnvVarName
 
 		// Explicitly clear environment variable before test
 		os.Unsetenv(envVarName)
@@ -69,7 +74,7 @@ func TestFilter_GetFilePatterns(t *testing.T) {
 		defer finish()
 
 		flagValue := "*.txt"
-		envVarName := "TEST_PATTERNS"
+		envVarName := testEnvVarName
 		os.Setenv(envVarName, "*.md")
 		defer os.Unsetenv(envVarName)
 
@@ -88,7 +93,7 @@ func TestFilter_GetFilePatterns(t *testing.T) {
 		defer finish()
 
 		flagValue := " *.txt , *.md , "
-		envVarName := "TEST_PATTERNS"
+		envVarName := testEnvVarName
 
 		result, err := f.filter.GetFilePatterns(flagValue, envVarName)
 		require.NoError(t, err)
@@ -106,7 +111,7 @@ func TestFilter_FindFilesByPatterns(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		dir := "/test"
+		dir := testDir
 		patterns := []string{"*.txt"}
 		allFiles := []string{"/test/file1.txt", "/test/file2.txt", "/test/file3.md"}
 
@@ -129,7 +134,7 @@ func TestFilter_FindFilesByPatterns(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		dir := "/test"
+		dir := testDir
 		patterns := []string{"*.txt"}
 		expectedErr := errors.New("find error")
 
@@ -148,7 +153,7 @@ func TestFilter_FindFilesByPatterns(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		dir := "/test"
+		dir := testDir
 		patterns := []string{}
 		allFiles := []string{"/test/file1.txt", "/test/file2.md"}
 

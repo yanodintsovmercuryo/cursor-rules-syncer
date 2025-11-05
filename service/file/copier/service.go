@@ -34,4 +34,3 @@ func NewCopier(fileOps fileOps) *Copier {
 		headerService: headerService,
 	}
 }
-

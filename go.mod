@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/google/go-cmp v0.6.0
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/stretchr/testify v1.9.0
 	github.com/urfave/cli/v2 v2.27.1
 	go.uber.org/mock v0.6.0

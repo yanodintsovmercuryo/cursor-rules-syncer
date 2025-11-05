@@ -111,4 +111,3 @@ func TestHeader_ExtractHeaderFromContent(t *testing.T) {
 		})
 	}
 }
-

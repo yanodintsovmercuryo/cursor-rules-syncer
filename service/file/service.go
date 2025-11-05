@@ -23,19 +23,6 @@ type fileOps interface {
 	Stat(filePath string) (os.FileInfo, error)
 }
 
-type outputService interface {
-	PrintErrorf(format string, args ...interface{})
-	PrintOperation(operationType, relativePath string)
-}
-
-type pathUtils interface {
-	RecreateDirectoryStructure(srcPath, srcBase, dstBase string) (string, error)
-	GetRelativePath(filePath, baseDir string) (string, error)
-	NormalizePath(filePath string) string
-	GetDirectory(filePath string) string
-	GetBaseName(filePath string) string
-}
-
 type comparatorService interface {
 	AreEqual(file1, file2 string, overwriteHeaders bool) (bool, error)
 }

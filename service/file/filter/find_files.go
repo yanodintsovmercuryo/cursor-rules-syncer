@@ -14,4 +14,3 @@ func (f *Filter) FindFilesByPatterns(dir string, patterns []string) ([]string, e
 func (f *Filter) filterFilesByPatterns(files []string, baseDir string, patterns []string) []string {
 	return f.patternFilter.FilterFilesByPatterns(files, baseDir, patterns)
 }
-

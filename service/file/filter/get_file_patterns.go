@@ -21,4 +21,3 @@ func (f *Filter) GetFilePatterns(flagValue, envVarName string) ([]string, error)
 
 	return patterns, nil
 }
-

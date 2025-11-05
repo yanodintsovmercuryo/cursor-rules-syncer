@@ -221,5 +221,3 @@ func TestFileService_CleanupExtraFilesByPatterns(t *testing.T) {
 		require.ErrorIs(t, err, expectedErr)
 	})
 }
-
-

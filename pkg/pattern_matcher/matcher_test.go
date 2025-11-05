@@ -114,4 +114,3 @@ func TestMatchesAnyPattern(t *testing.T) {
 		})
 	}
 }
-

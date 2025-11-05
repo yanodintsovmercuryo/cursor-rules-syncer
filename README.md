@@ -1,10 +1,10 @@
 # cursync
 
-A CLI tool for synchronizing Cursor IDE rules between a source directory and git project's `.cursor/rules` directory. The tool provides bidirectional synchronization (`pull` and `push` commands) with support for file pattern filtering, YAML header preservation, and automatic git commit management.
+A CLI tool for synchronizing Cursor IDE rules between a source directory and git project's `.cursor/rules` directory. The tool provides bidirectional synchronization (`pull` and `push` commands) with support for file pattern filtering, YAML header preservation, automatic git commit management, and configuration management (`cfg` command) for default values.
 
 ## Running components
 
-- **cursync** - CLI binary that provides `pull` and `push` commands for rules synchronization
+- **cursync** - CLI binary that provides `pull`, `push`, and `cfg` commands for rules synchronization and configuration management
 
 ## Dependencies
 
@@ -39,12 +39,25 @@ Pushes rules from the current git project's `.cursor/rules` directory to the sou
 - Automatically commits changes to git repository
 - Optional `--git-without-push` flag to commit without pushing
 
+### Config Command
+
+Manages default configuration values stored in `~/.config/cursync.toml`:
+
+- **View configuration**: Run `cursync cfg` without flags to display current default values
+- **Set defaults**: Use flags to set default values for any configuration option
+- **Clear defaults**: 
+  - For string flags: Set empty value (e.g., `--rules-dir=""`)
+  - For bool flags: Set to `false` (e.g., `--overwrite-headers=false`)
+- Configuration values are used as defaults when flags are not provided in `pull` and `push` commands
+
 ### Configuration
 
-- **`--rules-dir` / `-d`** - Path to rules directory (overrides `CURSOR_RULES_DIR` env var)
-- **`--file-patterns` / `-p`** - Comma-separated file patterns (e.g., `local_*.mdc,translate/*.md`) (overrides `CURSOR_RULES_PATTERNS` env var)
+- **`--rules-dir` / `-d`** - Path to rules directory (overrides config file and `CURSOR_RULES_DIR` env var)
+- **`--file-patterns` / `-p`** - Comma-separated file patterns (e.g., `local_*.mdc,translate/*.md`) (overrides config file and `CURSOR_RULES_PATTERNS` env var)
 - **`--overwrite-headers` / `-o`** - Overwrite headers instead of preserving them
 - **`--git-without-push` / `-w`** - Commit changes but don't push to remote (push command only)
+
+**Priority order**: Command-line flags > Configuration file (`~/.config/cursync.toml`) > Environment variables
 
 ### Environment Variables
 
@@ -68,6 +81,24 @@ cursync push -d ~/my-rules -w
 
 # Overwrite headers during sync
 cursync pull -d ~/my-rules -o
+
+# View current configuration
+cursync cfg
+
+# Set default rules directory
+cursync cfg --rules-dir ~/my-rules
+
+# Set default file patterns
+cursync cfg --file-patterns "local_*.mdc,translate/*.md"
+
+# Set default overwrite-headers flag
+cursync cfg --overwrite-headers=true
+
+# Clear default rules directory
+cursync cfg --rules-dir=""
+
+# Clear default overwrite-headers flag
+cursync cfg --overwrite-headers=false
 ```
 
 ## Development

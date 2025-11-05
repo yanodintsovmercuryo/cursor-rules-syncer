@@ -54,7 +54,10 @@ func (g *Git) CommitChanges(repoDir, commitMessage string, withoutPush bool) err
 	}
 
 	defer func() {
-		_ = os.Chdir(currentDir)
+		if chdirErr := os.Chdir(currentDir); chdirErr != nil {
+			// Ignore error on restore - we've already done the work
+			_ = chdirErr
+		}
 	}()
 
 	if err := os.Chdir(repoDir); err != nil {

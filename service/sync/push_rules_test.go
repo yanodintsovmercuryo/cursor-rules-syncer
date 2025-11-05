@@ -11,6 +11,15 @@ import (
 	"github.com/yanodintsovmercuryo/cursync/models"
 )
 
+const (
+	testCurrentDirPush   = "/test/current"
+	testGitRootPush      = "/test/git"
+	testDestRulesDirPush = "/test/git/.cursor/rules"
+	testSrcFilePush      = "/test/git/.cursor/rules/file1.mdc"
+	testDstFilePush      = "/test/rules/file1.mdc"
+	testRelativePathPush = "file1.mdc"
+)
+
 func TestSyncService_PushRules(t *testing.T) {
 	t.Run("error getting rules source dir", func(t *testing.T) {
 		t.Parallel()
@@ -58,7 +67,7 @@ func TestSyncService_PushRules(t *testing.T) {
 		options := &models.SyncOptions{
 			RulesDir: "/test/rules",
 		}
-		currentDir := "/test/current"
+		currentDir := testCurrentDirPush
 		expectedErr := errors.New("git root error")
 
 		f.fileOpsMock.EXPECT().
@@ -85,9 +94,9 @@ func TestSyncService_PushRules(t *testing.T) {
 		options := &models.SyncOptions{
 			RulesDir: "/test/rules",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -120,9 +129,9 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -161,9 +170,9 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -194,7 +203,7 @@ func TestSyncService_PushRules(t *testing.T) {
 
 		result, err := f.syncService.PushRules(options)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to find files")
+		require.Contains(t, err.Error(), "failed to find source files")
 		require.Nil(t, result)
 	})
 
@@ -207,9 +216,9 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "*.mdc",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -253,10 +262,10 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -305,10 +314,10 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "*.mdc",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -364,13 +373,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			OverwriteHeaders: false,
 			GitWithoutPush:   false,
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -476,13 +485,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			OverwriteHeaders: false,
 			GitWithoutPush:   true,
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -592,13 +601,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			FilePatterns:     "",
 			OverwriteHeaders: false,
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -679,9 +688,9 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -735,10 +744,10 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
 		srcFile := "/test/git/.cursor/rules/file1.mdc"
 
 		f.fileOpsMock.EXPECT().
@@ -808,13 +817,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			RulesDir:     "/test/rules",
 			FilePatterns: "",
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -895,13 +904,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			FilePatterns:     "",
 			OverwriteHeaders: false,
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -987,13 +996,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			FilePatterns:     "",
 			OverwriteHeaders: false,
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -1103,13 +1112,13 @@ func TestSyncService_PushRules(t *testing.T) {
 			FilePatterns:     "",
 			OverwriteHeaders: false,
 		}
-		currentDir := "/test/current"
-		gitRoot := "/test/git"
-		rulesSourceDirInProject := "/test/git/.cursor/rules"
-		projectFiles := []string{"/test/git/.cursor/rules/file1.mdc"}
-		srcFile := "/test/git/.cursor/rules/file1.mdc"
-		dstFile := "/test/rules/file1.mdc"
-		relativePath := "file1.mdc"
+		currentDir := testCurrentDirPush
+		gitRoot := testGitRootPush
+		rulesSourceDirInProject := testDestRulesDirPush
+		projectFiles := []string{testSrcFilePush}
+		srcFile := testSrcFilePush
+		dstFile := testDstFilePush
+		relativePath := testRelativePathPush
 
 		f.fileOpsMock.EXPECT().
 			GetCurrentDir().
@@ -1204,4 +1213,3 @@ func TestSyncService_PushRules(t *testing.T) {
 		require.Len(t, result.Operations, 1)
 	})
 }
-

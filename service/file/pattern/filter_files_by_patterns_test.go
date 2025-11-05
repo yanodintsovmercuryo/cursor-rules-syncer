@@ -74,4 +74,3 @@ func TestPatternFilterService_FilterFilesByPatterns(t *testing.T) {
 		}
 	})
 }
-

@@ -10,15 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testFile1Mdc = "file1.mdc"
+	testFile2Mdc = "file2.mdc"
+	testFile1Txt = "file1.txt"
+	testFile2Txt = "file2.txt"
+	testContent  = "content"
+)
+
 func TestComparator_AreEqual(t *testing.T) {
 	t.Run("mdc files with overwrite headers", func(t *testing.T) {
 		t.Parallel()
 		f, finish := setUp(t)
 		defer finish()
 
-		file1 := "file1.mdc"
-		file2 := "file2.mdc"
-		content := "content"
+		file1 := testFile1Mdc
+		file2 := testFile2Mdc
+		content := testContent
 
 		f.fileOpsMock.EXPECT().
 			ReadFileNormalized(file1).
@@ -43,8 +51,8 @@ func TestComparator_AreEqual(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		file1 := "file1.mdc"
-		file2 := "file2.mdc"
+		file1 := testFile1Mdc
+		file2 := testFile2Mdc
 		content1 := "---\nheader\n---\ncontent"
 		content2 := "---\nother\n---\ncontent"
 
@@ -71,9 +79,9 @@ func TestComparator_AreEqual(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		file1 := "file1.txt"
-		file2 := "file2.txt"
-		content := "content"
+		file1 := testFile1Txt
+		file2 := testFile2Txt
+		content := testContent
 
 		f.fileOpsMock.EXPECT().
 			ReadFileNormalized(file1).
@@ -98,8 +106,8 @@ func TestComparator_AreEqual(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		file1 := "file1.txt"
-		file2 := "file2.txt"
+		file1 := testFile1Txt
+		file2 := testFile2Txt
 		content1 := "content1"
 		content2 := "content2"
 
@@ -126,8 +134,8 @@ func TestComparator_AreEqual(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		file1 := "file1.txt"
-		file2 := "file2.txt"
+		file1 := testFile1Txt
+		file2 := testFile2Txt
 		expectedErr := errors.New("read error")
 
 		f.fileOpsMock.EXPECT().
@@ -148,8 +156,8 @@ func TestComparator_AreEqual(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		file1 := "file1.txt"
-		file2 := "file2.txt"
+		file1 := testFile1Txt
+		file2 := testFile2Txt
 		content1 := "content1"
 		expectedErr := errors.New("read error")
 
@@ -180,7 +188,7 @@ func TestComparator_AreEqual_MdcExtension(t *testing.T) {
 
 		file1 := "file1.mdc"
 		file2 := "file2.txt"
-		content := "content"
+		content := testContent
 
 		f.fileOpsMock.EXPECT().
 			ReadFileNormalized(file1).
@@ -206,8 +214,8 @@ func TestComparator_AreEqual_MdcExtension(t *testing.T) {
 		defer finish()
 
 		file1 := "file1.MDC"
-		file2 := "file2.mdc"
-		content := "content"
+		file2 := testFile2Mdc
+		content := testContent
 
 		f.fileOpsMock.EXPECT().
 			ReadFileNormalized(file1).

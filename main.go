@@ -5,11 +5,12 @@ import (
 	"os"
 
 	"github.com/urfave/cli/v2"
-	"github.com/yanodintsovmercuryo/cursync/models"
+	"github.com/yanodintsovmercuryo/cursync/pkg/config"
 	"github.com/yanodintsovmercuryo/cursync/pkg/file_ops"
 	"github.com/yanodintsovmercuryo/cursync/pkg/git"
 	"github.com/yanodintsovmercuryo/cursync/pkg/output"
 	"github.com/yanodintsovmercuryo/cursync/pkg/path"
+	cfgService "github.com/yanodintsovmercuryo/cursync/service/config"
 	"github.com/yanodintsovmercuryo/cursync/service/file"
 	"github.com/yanodintsovmercuryo/cursync/service/sync"
 )
@@ -31,6 +32,8 @@ func main() {
 		fileServiceImpl,
 	)
 
+	cfgServiceInstance := cfgService.NewCfgService(config.NewConfigRepository(), outputService)
+
 	app := &cli.App{
 		Name:  "cursor-rules-syncer",
 		Usage: "A CLI tool to sync cursor rules",
@@ -40,28 +43,23 @@ func main() {
 				Usage: "Pulls rules from the source directory to the current git project's .cursor/rules directory, deleting extra files in the project.",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:    "rules-dir",
-						Aliases: []string{"d"},
+						Name:    cfgService.FlagRulesDir,
+						Aliases: []string{cfgService.FlagAliasRulesDir},
 						Usage:   "Path to rules directory (overrides CURSOR_RULES_DIR env var)",
 					},
 					&cli.BoolFlag{
-						Name:    "overwrite-headers",
-						Aliases: []string{"o"},
+						Name:    cfgService.FlagOverwriteHeaders,
+						Aliases: []string{cfgService.FlagAliasOverwriteHeaders},
 						Usage:   "Overwrite headers instead of preserving them",
 					},
 					&cli.StringFlag{
-						Name:    "file-patterns",
-						Aliases: []string{"p"},
+						Name:    cfgService.FlagFilePatterns,
+						Aliases: []string{cfgService.FlagAliasFilePatterns},
 						Usage:   "Comma-separated file patterns to sync (e.g., 'local_*.mdc,translate/*.md') (overrides CURSOR_RULES_PATTERNS env var)",
 					},
 				},
 				Action: func(c *cli.Context) error {
-					options := &models.SyncOptions{
-						RulesDir:         c.String("rules-dir"),
-						GitWithoutPush:   false,
-						OverwriteHeaders: c.Bool("overwrite-headers"),
-						FilePatterns:     c.String("file-patterns"),
-					}
+					options := cfgServiceInstance.CreatePullOptions(c)
 
 					_, err := syncService.PullRules(options)
 					if err != nil {
@@ -75,39 +73,67 @@ func main() {
 				Usage: "Pushes rules from the current git project's .cursor/rules directory to the source directory, deleting extra files in the source, and commits changes",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:    "rules-dir",
-						Aliases: []string{"d"},
+						Name:    cfgService.FlagRulesDir,
+						Aliases: []string{cfgService.FlagAliasRulesDir},
 						Usage:   "Path to rules directory (overrides CURSOR_RULES_DIR env var)",
 					},
 					&cli.BoolFlag{
-						Name:    "git-without-push",
-						Aliases: []string{"w"},
+						Name:    cfgService.FlagGitWithoutPush,
+						Aliases: []string{cfgService.FlagAliasGitWithoutPush},
 						Usage:   "Commit changes but don't push to remote",
 					},
 					&cli.BoolFlag{
-						Name:    "overwrite-headers",
-						Aliases: []string{"o"},
+						Name:    cfgService.FlagOverwriteHeaders,
+						Aliases: []string{cfgService.FlagAliasOverwriteHeaders},
 						Usage:   "Overwrite headers instead of preserving them",
 					},
 					&cli.StringFlag{
-						Name:    "file-patterns",
-						Aliases: []string{"p"},
+						Name:    cfgService.FlagFilePatterns,
+						Aliases: []string{cfgService.FlagAliasFilePatterns},
 						Usage:   "Comma-separated file patterns to sync (e.g., 'local_*.mdc,translate/*.md') (overrides CURSOR_RULES_PATTERNS env var)",
 					},
 				},
 				Action: func(c *cli.Context) error {
-					options := &models.SyncOptions{
-						RulesDir:         c.String("rules-dir"),
-						GitWithoutPush:   c.Bool("git-without-push"),
-						OverwriteHeaders: c.Bool("overwrite-headers"),
-						FilePatterns:     c.String("file-patterns"),
-					}
+					options := cfgServiceInstance.CreatePushOptions(c)
 
 					_, err := syncService.PushRules(options)
 					if err != nil {
 						outputService.PrintFatalf("Error: %v", err)
 					}
 					return nil
+				},
+			},
+			{
+				Name:        "cfg",
+				Usage:       "Manage configuration values",
+				Description: "Set, get, or clear configuration values. For string flags, empty value clears the default. For bool flags, use --flag=false to clear.",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    cfgService.FlagRulesDir,
+						Aliases: []string{cfgService.FlagAliasRulesDir},
+						Usage:   "Set default rules directory (empty value clears it)",
+					},
+					&cli.StringFlag{
+						Name:    cfgService.FlagFilePatterns,
+						Aliases: []string{cfgService.FlagAliasFilePatterns},
+						Usage:   "Set default file patterns (empty value clears it)",
+					},
+					&cli.StringFlag{
+						Name:    cfgService.FlagOverwriteHeaders,
+						Aliases: []string{cfgService.FlagAliasOverwriteHeaders},
+						Usage:   "Set default overwrite-headers flag (use 'true', '1', 'false', '0', or empty to clear)",
+					},
+					&cli.StringFlag{
+						Name:    cfgService.FlagGitWithoutPush,
+						Aliases: []string{cfgService.FlagAliasGitWithoutPush},
+						Usage:   "Set default git-without-push flag (use 'true', '1', 'false', '0', or empty to clear)",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					if !cfgServiceInstance.HasConfigFlags(c) {
+						return cfgServiceInstance.ShowConfig()
+					}
+					return cfgServiceInstance.UpdateConfig(c)
 				},
 			},
 			{

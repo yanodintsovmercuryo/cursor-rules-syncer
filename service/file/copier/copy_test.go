@@ -9,6 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testFileMdc = "file.mdc"
+	testDestMdc = "dest.mdc"
+	testContent = "content"
+)
+
 func TestCopier_Copy(t *testing.T) {
 	t.Run("non-mdc file", func(t *testing.T) {
 		t.Parallel()
@@ -32,9 +38,9 @@ func TestCopier_Copy(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		srcPath := "file.mdc"
-		dstPath := "dest.mdc"
-		content := "content"
+		srcPath := testFileMdc
+		dstPath := testDestMdc
+		content := testContent
 
 		f.fileOpsMock.EXPECT().
 			ReadFileNormalized(srcPath).
@@ -90,9 +96,9 @@ func TestCopier_Copy(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		srcPath := "file.mdc"
-		dstPath := "dest.mdc"
-		content := "content"
+		srcPath := testFileMdc
+		dstPath := testDestMdc
+		content := testContent
 
 		f.fileOpsMock.EXPECT().
 			FileExists(dstPath).
@@ -141,9 +147,9 @@ func TestCopier_Copy(t *testing.T) {
 		f, finish := setUp(t)
 		defer finish()
 
-		srcPath := "file.mdc"
-		dstPath := "dest.mdc"
-		content := "content"
+		srcPath := testFileMdc
+		dstPath := testDestMdc
+		content := testContent
 		expectedErr := errors.New("write error")
 
 		f.fileOpsMock.EXPECT().

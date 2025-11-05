@@ -32,4 +32,3 @@ func setUp(t *testing.T) (*fixture, func()) {
 		fileOpsMock: fileOpsMock,
 	}, ctrl.Finish
 }
-

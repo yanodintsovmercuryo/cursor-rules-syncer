@@ -33,4 +33,3 @@ func setUpWithRealPathUtils(t *testing.T) (*pattern.PatternFilterService, func()
 
 	return pattern.NewPatternFilterService(pathUtilsImpl), func() {}
 }
-

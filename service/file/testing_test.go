@@ -33,4 +33,3 @@ func setUp(t *testing.T) (*fixture, func()) {
 		filterMock:     filterMock,
 	}, ctrl.Finish
 }
-

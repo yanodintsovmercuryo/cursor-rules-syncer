@@ -199,4 +199,3 @@ func TestOutput_PrintWarningf(t *testing.T) {
 		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 }
-

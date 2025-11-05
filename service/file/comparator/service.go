@@ -29,4 +29,3 @@ func NewComparator(fileOps fileOps) *Comparator {
 		headerService: headerService,
 	}
 }
-

@@ -125,4 +125,3 @@ func (o *Output) PrintFatalf(format string, args ...interface{}) {
 	o.PrintErrorf("\033[31m"+format+"\033[0m", args...)
 	os.Exit(1)
 }
-

@@ -89,11 +89,11 @@ func (f *FileOps) CopyFile(srcPath, dstPath string) error {
 		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create directory for %s: %w", dstPath, err)
+	if mkdirErr := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); mkdirErr != nil {
+		return fmt.Errorf("failed to create directory for %s: %w", dstPath, mkdirErr)
 	}
 
-	err = os.WriteFile(dstPath, content, 0644)
+	err = os.WriteFile(dstPath, content, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write destination file %s: %w", dstPath, err)
 	}

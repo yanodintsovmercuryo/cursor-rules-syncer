@@ -73,4 +73,3 @@ func removeLeadingEmptyLines(lines []string) []string {
 
 	return lines
 }
-
