@@ -1,8 +1,13 @@
 module github.com/yanodintsovmercuryo/cursor-rules-syncer
 
-go 1.21
+go 1.23.0
 
-require github.com/urfave/cli/v2 v2.27.1
+toolchain go1.24.2
+
+require (
+	github.com/urfave/cli/v2 v2.27.1
+	go.uber.org/mock v0.6.0
+)
 
 require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
