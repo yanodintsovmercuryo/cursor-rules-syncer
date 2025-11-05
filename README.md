@@ -1,5 +1,7 @@
 # Cursor Rules Syncer
 
+> **⚠️ DEPRECATED:** This repository is deprecated. Please use [github.com/yanodintsovmercuryo/cursync](https://github.com/yanodintsovmercuryo/cursync) instead.
+
 A command-line tool to help synchronize [Cursor](https://cursor.sh) IDE's AI rules (`.mdc` files) between a central rules repository and your individual project repositories.
 
 It allows you to maintain a canonical set of rules in one place and easily `pull` them into any project, or `push` local project-specific rule modifications back to the central repository.
@@ -18,18 +20,20 @@ It allows you to maintain a canonical set of rules in one place and easily `pull
 
 ## Installation
 
+> **⚠️ DEPRECATED:** Please use the new repository: [github.com/yanodintsovmercuryo/cursync](https://github.com/yanodintsovmercuryo/cursync)
+
 To install the `cursor-rules-syncer` CLI, run:
 
 ```bash
-go install github.com/yanodintsovmercuryo/cursor-rules-syncer@latest
+go install github.com/yanodintsovmercuryo/cursync@latest
 ```
 
 This will download the source code, compile it, and place the executable in your `$GOPATH/bin` or `$GOBIN` directory. Ensure this directory is in your system's `PATH`.
 
 Alternatively, you can build from source:
-1. Clone this repository.
+1. Clone the [github.com/yanodintsovmercuryo/cursync](https://github.com/yanodintsovmercuryo/cursync) repository.
 2. Navigate to the repository directory.
-3. Run `go build .` or `task build`. This will create a `cursor-rules-syncer` executable.
+3. Run `go build .` or `task build`. This will create a `cursync` executable.
 
 ## Usage
 
